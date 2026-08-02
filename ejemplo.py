@@ -1,11 +1,15 @@
+import sys
+
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
+debug = False
+
 @tool
 def get_weather(city: str) -> str:
     """Get weather for a given city."""
-    return f"It's always sunny in {city}!"
+    return f"It's always sunny in {city}"
 
 model = ChatOllama(
     model="llama3.1:8b",
@@ -16,8 +20,8 @@ model = ChatOllama(
 agent = create_agent(
     model=model,
     tools=[get_weather],
-    system_prompt="You are a helpful assistant.",
-    debug=False 
+    system_prompt="Eres un asistente climatico. Responde en español.",
+    debug=debug 
 )
 
 try:
@@ -29,6 +33,9 @@ try:
     print(result["messages"][-1].content)
 except Exception as e:
     print(f"Execution Error: {e}")
+
+if not debug:
+    sys.exit()    
 
 # Print out the explicit sequence to see what the agent did
 for msg in result["messages"]:

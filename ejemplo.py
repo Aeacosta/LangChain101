@@ -4,12 +4,12 @@ from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 
-debug = False
+debug = True
 
 @tool
 def get_weather(city: str) -> str:
-    """Get weather for a given city."""
-    return f"It's always sunny in {city}"
+    """Get the current weather for a given location."""
+    return f"The weather in {city} is sunny and 22°C."
 
 model = ChatOllama(
     model="llama3.1:8b",
@@ -26,7 +26,7 @@ agent = create_agent(
 
 try:
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": "What's the weather in San Francisco?"}]}
+        {"messages": [{"role": "user", "content": "What's the weather in Heredia, Costa Rica?"}]}
     )
     print("Agent Executed via Modern LangChain Pipeline!\n")
     

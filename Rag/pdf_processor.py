@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 try:
@@ -11,40 +12,45 @@ except ImportError:
 
 from RAG.rag_config import RAGConfig
 
+_logger = logging.getLogger("pdf_processor")
+
 
 class PDFProcessor:
 	"""Procesa PDFs y extrae texto."""
-	
-	def __init__(self, config: RAGConfig):
+
+	def __init__(self, config: RAGConfig, logger=None):
 		if PdfReader is None:
 			raise ImportError("PyPDF2 no está instalado. Instala con: pip install PyPDF2")
-		
+
 		self.config = config
 		self.pdf_folder = Path(config.pdf_folder)
-	
+		# If an AgentLogger is injected its handlers are already wired to
+		# the "pdf_processor" child logger via AgentLogger.__init__.
+		self._log = _logger
+
 	def process_all_pdfs(self) -> list[dict[str, str]]:
 		"""Procesa todos los PDFs en la carpeta y retorna chunks de texto."""
 		documents = []
-		
+
 		if not self.pdf_folder.exists():
-			print("Carpeta %s no existe", self.config.pdf_folder)
+			self._log.warning("Carpeta %s no existe", self.config.pdf_folder)
 			return documents
-		
+
 		pdf_files = list(self.pdf_folder.glob("*.pdf"))
 		if not pdf_files:
-			print("No se encontraron PDFs en %s", self.config.pdf_folder)
+			self._log.warning("No se encontraron PDFs en %s", self.config.pdf_folder)
 			return documents
-		
-		print("Procesando %d PDF(s)...", len(pdf_files))
-		
+
+		self._log.info("Procesando %d PDF(s)...", len(pdf_files))
+
 		for pdf_path in pdf_files:
 			try:
 				chunks = self._extract_chunks_from_pdf(pdf_path)
 				documents.extend(chunks)
-				print("  %s -> %d chunks", pdf_path.name, len(chunks))
+				self._log.debug("  %s -> %d chunks", pdf_path.name, len(chunks))
 			except Exception as e:
-				self._log._logger.error("Error procesando %s: %s", pdf_path.name, e)
-		
+				self._log.error("Error procesando %s: %s", pdf_path.name, e)
+
 		return documents
 	
 	def _extract_chunks_from_pdf(self, pdf_path: Path) -> list[dict[str, str]]:

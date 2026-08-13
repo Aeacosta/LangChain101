@@ -53,3 +53,26 @@ I --> G
 - Escribir Archivo
 - Compilar y ejecutar pruebas unitarias
 
+## Agente Validador de Requirimientos
+
+```mermaid
+flowchart TD
+A(Inicio) --> B[Leer Hoja de Requirimientos]
+B --> C[Analizar cambios .diff]
+C --> D[Generar resumen ejecutivos de cambios]
+D --> E[Comparar requirimientos y resumen]
+E --> F{Cumple los requerimientos?}
+F --> |No|G[Informar al usuario]
+F --> |Si|H(Fin)
+G --> H
+```
+
+### Herramientas
+
+- Leer Archivo
+- Leer Tiquetes (GitHub, Jira)
+- GitHub MCP
+
+### Sub Agentes
+
+- Evaludor de requirimientos

@@ -63,7 +63,8 @@ C --> D[Generar resumen ejecutivos de cambios]
 D --> E[Comparar requirimientos y resumen]
 E --> F{Cumple los requerimientos?}
 F --> |No|G[Informar al usuario]
-F --> |Si|H(Fin)
+F --> |Si|I[Crear PR]
+I --> H(Fin)
 G --> H
 ```
 

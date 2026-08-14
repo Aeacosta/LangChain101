@@ -1,62 +1,32 @@
 
-import re
+import json
+import os
 
+from dotenv import load_dotenv
 from langchain.agents import create_agent
-from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 
 import Rag
 from Helpers.Logger import AgentLogger
+from Helpers.JsonFormatterAgent import JsonFormatterAgent
+from Structures.CodeSmellReport import CodeSmellReport
 
-
-# Control-character escape table for JSON strings (everything below 0x20).
-_CTRL_ESCAPE = {
-    '\n': '\\n',
-    '\r': '\\r',
-    '\t': '\\t',
-    '\b': '\\b',
-    '\f': '\\f',
-}
-
-
-def _fix_json_string_control_chars(text: str) -> str:
-    """Replace literal control characters inside JSON string literals with
-    their valid JSON escape sequences.
-
-    The regex matches a JSON string token (starting with an unescaped ``"``),
-    capturing everything up to the closing ``"``.  Inside that span any raw
-    control character is replaced with its ``\\x`` counterpart so that the
-    resulting text is parseable by a standard JSON parser.
-    """
-
-    def _escape_controls_in_match(m: re.Match) -> str:
-        content = m.group(1)
-        result = []
-        for ch in content:
-            if ch in _CTRL_ESCAPE:
-                result.append(_CTRL_ESCAPE[ch])
-            elif ord(ch) < 0x20:
-                result.append(f'\\u{ord(ch):04x}')
-            else:
-                result.append(ch)
-        return '"' + ''.join(result) + '"'
-
-    # Match a JSON string: opening ", then any chars (non-greedy, with
-    # backslash-escape awareness), then closing ".
-    return re.sub(r'"((?:[^"\\]|\\.)*)\"', _escape_controls_in_match, text,
-                  flags=re.DOTALL)
+# Load .env if it exists, otherwise fall back to .env.example
+load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
 
 
 class Agent:
 
     def __init__(self, prompt: str, tools, logger: AgentLogger | None = None):
         self._log = logger or AgentLogger(name="agente")
-
-        model = ChatOllama(
-            model="llama3.1:8b",
-            temperature=0,
-            base_url="http://localhost:11434",
+        api_key = os.getenv("LLM_API_KEY")
+        model = ChatOpenAI(
+            model=os.getenv("LLM_MODEL", "deepseek-chat"),
+            openai_api_key=api_key,
+            openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
         )
+
+        self._formatter = JsonFormatterAgent(self._log)
 
         self.agent = create_agent(
             model=model,
@@ -93,21 +63,75 @@ The response MUST conform to the provided JSON schema.
 """
         },]}
         )
-        raw = result["messages"][-1].content
+        prompt_response = result["messages"][-1].content
 
-        # Some LangChain/Ollama versions prepend "assistant\n\n" to the content.
-        # Strip any leading role label and whitespace before returning.
-        answer = raw.strip()
-        if answer.lower().startswith("assistant"):
-            answer = answer[len("assistant"):].lstrip()
+        # Pass the raw analysis through the formatter agent to get clean JSON.
+        answer = self._formatter.format(prompt_response)
 
-        # The LLM sometimes emits literal newlines/tabs inside JSON string values
-        # instead of the required \n / \t escape sequences, making the JSON
-        # unparseable.  Fix every unescaped control character that appears
-        # between the enclosing double-quotes of a JSON string token.
-        answer = _fix_json_string_control_chars(answer)
+        # Inject the original free-text response so callers can inspect it.
+        try:
+            parsed = json.loads(answer)
+            if isinstance(parsed, dict):
+                parsed["prompt_response"] = prompt_response
+                answer = json.dumps(parsed)
+        except Exception:
+            pass
 
         self._log.respuesta_final(answer)
         self._log._logger.debug("%s", answer)
         return answer
+
+    def stream_agent(self, message: str):
+        """Yield raw text chunks from the LLM as they arrive.
+
+        Each yielded value is a plain string token.  The final chunk is always
+        the complete, post-processed JSON string (same output as call_agent).
+        Callers that only care about the finished JSON should use call_agent.
+        """
+        self._log.inicio(message, [])
+        input_payload = {
+            "messages": [
+                {"role": "user", "content": message},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert C# software engineer and code-quality reviewer.\n\n"
+                        "Analyze the provided C# source file and identify meaningful code smells,\n"
+                        "SOLID violations, maintainability problems, and opportunities for refactoring.\n\n"
+                        "Be conservative. Do not report theoretical or insignificant issues.\n"
+                        "Do not invent line numbers, APIs, classes, or behavior.\n\n"
+                        "For every finding provide:\n"
+                        "- code smell\n- severity\n- location\n- explanation\n"
+                        "- impact\n- recommendation\n- unified diff\n\n"
+                        "The response MUST conform to the provided JSON schema."
+                    ),
+                },
+            ]
+        }
+
+        collected: list[str] = []
+        for event in self.agent.stream(input_payload, stream_mode="messages", config={"configurable": {"streaming": True}}):
+            # stream_mode="messages" yields (message_chunk, metadata) tuples.
+            chunk, _meta = event if isinstance(event, tuple) else (event, {})
+            token = getattr(chunk, "content", "") or ""
+            if token:
+                collected.append(token)
+                self._log.stream_token(token)
+                yield token
+
+        # Re-assemble and pass through the formatter agent to get clean JSON.
+        prompt_response = "".join(collected)
+
+        raw = self._formatter.format(prompt_response)
+
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                parsed["prompt_response"] = prompt_response
+                raw = json.dumps(parsed)
+        except Exception:
+            pass
+
+        self._log.respuesta_final(raw)
+        self._log._logger.info("%s", raw)
     

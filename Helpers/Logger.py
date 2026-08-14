@@ -212,6 +212,9 @@ class AgentLogger:
     def tool_error(self, tool_name: str, exc: Exception) -> None:
         self._logger.error("✗ Error en tool %r: %s", tool_name, exc)
 
+    def stream_token(self, token: str) -> None:
+        self._logger.debug("◂ %s", token)
+
     def respuesta_final(self, answer: str) -> None:
         self._logger.info(self._LINE)
         self._logger.info("Respuesta final  (%d caracteres)", len(answer))

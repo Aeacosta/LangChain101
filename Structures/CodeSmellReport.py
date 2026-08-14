@@ -43,3 +43,4 @@ class CodeSmellReport:
     summary: Summary
     findings: list[Finding] = field(default_factory=list)
     refactoringOrder: list[RefactoringItem] = field(default_factory=list)
+    prompt_response: str = field(default="")

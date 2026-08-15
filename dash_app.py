@@ -338,18 +338,106 @@ def _render_side_by_side(original: str, patched: str, errors: list[str]) -> html
     return html.Div(children)
 
 
+# ── Score card ────────────────────────────────────────────────────────────────
+
+def _render_score_card(score_report: dict) -> dbc.Card:
+    score   = score_report.get("score", 0)
+    grade   = score_report.get("grade", "?")
+    just    = score_report.get("justification", "")
+    bdown   = score_report.get("breakdown", [])
+
+    # Grade colour
+    grade_colors = {"A": "#16a34a", "B": "#65a30d", "C": "#ca8a04", "D": "#d97706", "F": "#dc2626"}
+    grade_color  = grade_colors.get(grade, "#6b7280")
+
+    # Score bar (0–100)
+    bar_color = grade_color
+    bar = html.Div(
+        html.Div(
+            style={
+                "width":           f"{score}%",
+                "height":          "10px",
+                "backgroundColor": bar_color,
+                "borderRadius":    "5px",
+                "transition":      "width 0.4s ease",
+            }
+        ),
+        style={
+            "width":         "100%",
+            "backgroundColor": "#e5e7eb",
+            "borderRadius":  "5px",
+            "marginBottom":  "8px",
+        },
+    )
+
+    # Breakdown table rows
+    bdown_rows = [
+        html.Tr([
+            html.Td(row["severity"],                          style={"color": _SEV_COLOR.get(row["severity"], "#6b7280"), "fontWeight": "600", "paddingRight": "12px"}),
+            html.Td(f'×{row["count"]}',                      style={"textAlign": "center", "paddingRight": "12px"}),
+            html.Td(f'−{float(row["penalty"]):.1f} pts',     style={"textAlign": "right",  "color": "#dc2626"}),
+        ])
+        for row in bdown if row.get("count", 0) > 0
+    ]
+
+    return dbc.Card(
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.Div(
+                        grade,
+                        style={
+                            "fontSize":      "3rem",
+                            "fontWeight":    "700",
+                            "color":         grade_color,
+                            "lineHeight":    "1",
+                            "textAlign":     "center",
+                        },
+                    ),
+                    html.Div(
+                        "Grade",
+                        style={"textAlign": "center", "color": "#57606a", "fontSize": "0.75rem"},
+                    ),
+                ], width=2),
+                dbc.Col([
+                    html.Div([
+                        html.Span(
+                            f"{score}",
+                            style={"fontSize": "2rem", "fontWeight": "700", "color": grade_color},
+                        ),
+                        html.Span(" / 100", style={"color": "#57606a", "fontSize": "1rem"}),
+                    ], className="mb-1"),
+                    bar,
+                    html.P(just, className="mb-2", style={"fontSize": "0.875rem", "color": "#374151"}),
+                    html.Table(
+                        bdown_rows,
+                        style={"fontSize": "0.8rem", "borderCollapse": "collapse"},
+                    ) if bdown_rows else None,
+                ], width=10),
+            ], align="center"),
+        ]),
+        className="mb-3",
+        style={"borderLeft": f"4px solid {grade_color}"},
+    )
+
+
 # ── Report renderer ───────────────────────────────────────────────────────────
 
 def _render_report(data: dict) -> html.Div:
-    summary  = data.get("summary", {})
-    findings = data.get("findings", [])
-    order    = data.get("refactoringOrder", [])
+    summary     = data.get("summary", {})
+    findings    = data.get("findings", [])
+    order       = data.get("refactoringOrder", [])
+    score_report = data.get("scoreReport")
 
     detected = summary.get("smellsDetected", 0)
     priority = summary.get("highestPriority") or "—"
     p_color  = _SEV_COLOR.get(priority, "#6b7280")
 
     cards = []
+
+    # Score card (shown first if available)
+    if score_report:
+        cards.append(_render_score_card(score_report))
 
     # Summary card
     cards.append(

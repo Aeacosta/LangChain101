@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 import Rag
 from Helpers.Logger import AgentLogger
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
+from Helpers.ScorerAgent import ScorerAgent
 from Structures.CodeSmellReport import CodeSmellReport
 
 # Load .env if it exists, otherwise fall back to .env.example
@@ -27,6 +28,7 @@ class Agent:
         )
 
         self._formatter = JsonFormatterAgent(self._log)
+        self._scorer    = ScorerAgent(self._log)
 
         self.agent = create_agent(
             model=model,
@@ -68,11 +70,14 @@ The response MUST conform to the provided JSON schema.
         # Pass the raw analysis through the formatter agent to get clean JSON.
         answer = self._formatter.format(prompt_response)
 
-        # Inject the original free-text response so callers can inspect it.
+        # Score the report and inject both score and original response.
         try:
             parsed = json.loads(answer)
             if isinstance(parsed, dict):
                 parsed["prompt_response"] = prompt_response
+                score_json = self._scorer.score(parsed)
+                score_data = json.loads(score_json)
+                parsed["scoreReport"] = score_data
                 answer = json.dumps(parsed)
         except Exception:
             pass
@@ -124,10 +129,14 @@ The response MUST conform to the provided JSON schema.
 
         raw = self._formatter.format(prompt_response)
 
+        # Score the report and inject both score and original response.
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 parsed["prompt_response"] = prompt_response
+                score_json = self._scorer.score(parsed)
+                score_data = json.loads(score_json)
+                parsed["scoreReport"] = score_data
                 raw = json.dumps(parsed)
         except Exception:
             pass

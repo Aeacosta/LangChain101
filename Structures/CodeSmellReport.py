@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from Structures.ScoreReport import ScoreReport
+
 
 @dataclass
 class Location:
@@ -45,3 +47,4 @@ class CodeSmellReport:
     findings: list[Finding] = field(default_factory=list)
     refactoringOrder: list[RefactoringItem] = field(default_factory=list)
     prompt_response: str = field(default="")
+    scoreReport: ScoreReport | None = field(default=None)

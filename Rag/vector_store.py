@@ -44,7 +44,10 @@ class VectorStore:
 		# Chroma genera embeddings automáticamente
 		ids = [doc["id"] for doc in documents]
 		documents_text = [doc["text"] for doc in documents]
-		metadatas = [{"source": doc.get("source", "unknown")} for doc in documents]
+		metadatas = [
+			{"source": doc.get("source", "unknown"), "chapter": doc.get("chapter", "")}
+			for doc in documents
+		]
 
 		self.collection.upsert(
 			ids=ids,
@@ -69,6 +72,7 @@ class VectorStore:
 				documents.append({
 					"text": doc,
 					"source": metadata.get("source", "unknown"),
+					"chapter": metadata.get("chapter", ""),
 					"distance": float(results["distances"][0][i]) if results["distances"] else 0,
 				})
 		self._log.debug("Resultados encontrados: %d", len(documents))

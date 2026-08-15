@@ -108,6 +108,7 @@ An array of detected code smells. Each finding MUST contain:
 * `impact`: array of strings
 * `recommendation`: string
 * `diff`: string
+* `ragReference`: string — the APA-format citation returned by the `find_documents` tool that supports this finding. Call `find_documents` with the smell name or a short description of the bad practice. Copy the returned string **verbatim** into this field. If no relevant document is found, use `""`.
 
 ### location
 Must contain:
@@ -159,6 +160,7 @@ Before returning the response, internally verify:
 * Every `findingId` in `refactoringOrder` exists in `findings`.
 * `startLine` is less than or equal to `endLine` when both are provided.
 * Every `diff` is a JSON string.
+* Every finding has a `ragReference` string (may be empty but must be present).
 * No Markdown code fences exist anywhere.
 * There is exactly one root JSON object.
 * The result can be parsed by a standard JSON parser.

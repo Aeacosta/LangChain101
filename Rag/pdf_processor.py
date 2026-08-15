@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 try:
@@ -53,27 +54,47 @@ class PDFProcessor:
 
 		return documents
 	
+	# Matches common chapter/section heading patterns, e.g.:
+	#   "Chapter 3: Clean Code"  "3. Functions"  "CHAPTER 3 – Functions"
+	_HEADING_RE = re.compile(
+		r'^(?:chapter\s+\d+\s*[-–:]\s*|chapter\s+\d+\s+|\d+\.\s+)(.+)',
+		re.IGNORECASE,
+	)
+
+	def _extract_chapter(self, text: str) -> str:
+		"""Return the first heading found in text, or empty string."""
+		for line in text.splitlines():
+			line = line.strip()
+			m = self._HEADING_RE.match(line)
+			if m:
+				return line  # return the full heading line as-is
+		return ""
+
 	def _extract_chunks_from_pdf(self, pdf_path: Path) -> list[dict[str, str]]:
-		"""Extrae chunks de un PDF."""
+		"""Extrae chunks de un PDF etiquetando cada uno con su capítulo."""
 		reader = PdfReader(pdf_path)
-		text = ""
-		
-		for page in reader.pages:
-			text += page.extract_text()
-		
-		# Crear chunks
+
+		full_text = "".join(page.extract_text() or "" for page in reader.pages)
+
 		chunks = []
 		chunk_size = self.config.chunk_size
 		overlap = self.config.chunk_overlap
-		
-		for i in range(0, len(text), chunk_size - overlap):
-			chunk = text[i:i + chunk_size]
-			if chunk.strip():
-				chunk_id = f"{pdf_path.name}_chunk_{i}"
-				chunks.append({
-					"id": chunk_id,
-					"text": chunk,
-					"source": pdf_path.name
-				})
-		
+		current_chapter = ""
+
+		for i in range(0, len(full_text), chunk_size - overlap):
+			chunk = full_text[i:i + chunk_size]
+			if not chunk.strip():
+				continue
+			# Update the running chapter whenever a heading appears in the chunk.
+			detected = self._extract_chapter(chunk)
+			if detected:
+				current_chapter = detected
+			chunk_id = f"{pdf_path.name}_chunk_{i}"
+			chunks.append({
+				"id": chunk_id,
+				"text": chunk,
+				"source": pdf_path.stem,
+				"chapter": current_chapter,
+			})
+
 		return chunks

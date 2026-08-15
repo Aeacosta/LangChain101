@@ -41,7 +41,8 @@ SCHEMA:
       "description": "string",
       "impact": ["string"],
       "recommendation": "string",
-      "diff": "string"
+      "diff": "string",
+      "ragReference": "string"
     }
   ],
   "refactoringOrder": [

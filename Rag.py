@@ -16,5 +16,22 @@ class RagCore:
         if chunks:
             self.vector_store.add_documents(chunks)
 
-    def find_documents(self, text_to_find: str):
-        return self.vector_store.search(text_to_find)
+    def find_documents(self, text_to_find: str) -> str:
+        """Search the vector store and return the top result formatted as an
+        APA-style reference string the LLM can copy directly into ragReference.
+
+        Format: Title (n.d.). Chapter heading.
+        """
+        results = self.vector_store.search(text_to_find)
+        if not results:
+            return ""
+
+        # Use the closest match (first result, lowest cosine distance).
+        top = results[0]
+        source = top.get("source", "Unknown")
+        chapter = top.get("chapter", "")
+
+        # Build APA-style reference: Title (n.d.). Chapter.
+        chapter_part = f" {chapter}." if chapter else ""
+        apa = f"{source} (n.d.).{chapter_part}"
+        return apa

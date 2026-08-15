@@ -21,6 +21,7 @@ class Finding:
     impact: list[str]
     recommendation: str
     diff: str
+    ragReference: str = ""
 
 
 @dataclass

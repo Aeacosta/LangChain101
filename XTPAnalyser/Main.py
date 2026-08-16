@@ -30,9 +30,7 @@ log = AgentLogger(name="xtp_main", level="DEBUG")
 compare_files = XTPFileComparer(r"Programas/Program_A_20260816_002045.xtp", r"Programas/Program_B_20260816_002045.xtp")
 
 program_diff_agent = XTPProgramDiffAgent(logger=log)
-diff_answer = program_diff_agent.invoke(
-    f"Provide a summary differences for: {compare_files.view_a} and {compare_files.view_b} with this diff: {compare_files.diff_view}"
-)
+diff_answer = program_diff_agent.analyse(compare_files)
 log._logger.info("=== XTP Program Diff Agent ===")
 log._logger.info(diff_answer)
 

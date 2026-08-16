@@ -1,5 +1,5 @@
 """
-XTPExpertAgent — RAG-backed XTP Expert Q&A agent.
+XTPProgramDiffAgent — Audits and summarises deltas between two XTP programs.
 
 Wires the XTP Manual RAG (DocumentosXTP/Manual.md) into a LangChain agent
 as a tool so the LLM can retrieve grounded context from the manual before
@@ -14,8 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
 from RAG.xtp_rag import XTPRagCore
-
-import difflib
+from XTPAnalyser.CompareFiles import XTPFileComparer
 
 from dotenv import load_dotenv
 
@@ -109,9 +108,29 @@ class XTPProgramDiffAgent:
             debug=False,
         )
 
+    def analyse(self, comparer: XTPFileComparer) -> str:
+        """Run a full diff analysis from an :class:`XTPFileComparer` instance.
+
+        Parameters
+        ----------
+        comparer:
+            A pre-built :class:`XTPFileComparer` whose ``view_a``, ``view_b``,
+            and ``diff_view`` properties are used to build the prompt.
+
+        Returns
+        -------
+        str
+            Structured Markdown analysis produced by the agent.
+        """
+        message = (
+            f"Provide a summary differences for: {comparer.view_a} "
+            f"and {comparer.view_b} with this diff: {comparer.diff_view}"
+        )
+        return self.invoke(message)
+
     def invoke(self, message: str) -> str:
         """Run the expert agent with *message* and return the answer string."""
-        self._log._logger.debug("[XTPExpertAgent] Question: %s", message)
+        self._log._logger.debug("[XTPProgramDiffAgent] Question: %s", message)
         result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
         return result["messages"][-1].content
 

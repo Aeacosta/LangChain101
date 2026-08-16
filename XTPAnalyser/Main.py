@@ -13,8 +13,11 @@ import os
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from XTPAnalyser.XTPExpertAgent import XTPExpertAgent
-from XTPAnalyser.graph import XTPState, build_graph
+from XTPAnalyser.XTPProgramDiffAgent import XTPProgramDiffAgent
+from XTPAnalyser.CompareFiles import XTPFileComparer
+from XTPAnalyser.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
+from XTPAnalyser.XTPMismatchJustificationAgent import XTPMismatchJustificationAgent
+from XTPAnalyser.XTPTableExtractor import XTPTableExtractor
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -24,40 +27,42 @@ load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
 
 log = AgentLogger(name="xtp_main", level="DEBUG")
 
-# ---------------------------------------------------------------------------
-# 1. XTP Expert Agent — standalone RAG Q&A (not part of the graph)
-# ---------------------------------------------------------------------------
+compare_files = XTPFileComparer(r"Programas/Program_A_20260816_002045.xtp", r"Programas/Program_B_20260816_002045.xtp")
 
-expert_agent = XTPExpertAgent(logger=log)
-expert_answer = expert_agent.invoke(
-    "What are the XTP main structural blocks and what are their use?"
+program_diff_agent = XTPProgramDiffAgent(logger=log)
+diff_answer = program_diff_agent.invoke(
+    f"Provide a summary differences for: {compare_files.view_a} and {compare_files.view_b} with this diff: {compare_files.diff_view}"
 )
-print("=== XTP Expert Agent ===")
-print(expert_answer)
+log._logger.info("=== XTP Program Diff Agent ===")
+log._logger.info(diff_answer)
+
+bin2bin_matrix_agent = XTPBin2BinMatrixAgent(logger=log)
+bin2bin_answer = bin2bin_matrix_agent.analyse(r"Programas/Bin2Bin_20260816_002045.csv")
+log._logger.info("=== XTP Bin2Bin Matrix Agent ===")
+log._logger.info(bin2bin_answer)
 
 # ---------------------------------------------------------------------------
-# 2. Run the LangGraph pipeline (generate → deliver)
+# Mismatch justification — correlates every off-diagonal transition with the
+# diff changes found above and returns a single justification table.
 # ---------------------------------------------------------------------------
 
-print("\n=== XTP Pipeline (LangGraph) ===")
+mismatch_agent = XTPMismatchJustificationAgent(logger=log)
+justification_table = mismatch_agent.justify(
+    matrix_report=bin2bin_answer,
+    diff_report=diff_answer,
+)
+log._logger.info("=== XTP Mismatch Justification Agent ===")
+log._logger.info(justification_table)
 
-app = build_graph(logger=log)
+# ---------------------------------------------------------------------------
+# Table extraction — parse the Markdown justification table into a DataFrame.
+# ---------------------------------------------------------------------------
 
-initial_state: XTPState = {"output_folder": "Programas", "log": []}
+extractor = XTPTableExtractor()
+try:
+    mismatch_df = extractor.extract(justification_table)
+    log._logger.info("=== Mismatch Justification DataFrame ===")
+    log._logger.info("\n%s", mismatch_df.to_string(index=False))
+except ValueError as exc:
+    log._logger.warning("Could not extract table: %s", exc)
 
-# Each chunk from stream() is {"node_name": node_state_dict} in LangGraph 1.x.
-for chunk in app.stream(initial_state):
-    for node_name, node_state in chunk.items():
-        print(f"\n── Node: {node_name} ──")
-        for line in node_state.get("log", []):
-            print(f"  {line}")
-
-# Final state
-final: XTPState = app.invoke(initial_state)
-
-print("\n=== Generator Output (excerpt) ===")
-gen_out = final.get("generator_output", "")
-print(gen_out[:500] + ("…" if len(gen_out) > 500 else ""))
-
-print("\n=== Delivery Result ===")
-print(final.get("delivery_result", final.get("error", "(none)")))

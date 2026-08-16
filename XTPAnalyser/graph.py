@@ -79,7 +79,7 @@ def _generate_node(state: XTPState) -> XTPState:
     try:
         agent = XTPGeneratorAgent()
         log.append("▶ Running generator (this may take ~30–60 s) …")
-        generator_output = agent.invoke("Generate 2 Random XTP Programs")
+        generator_output = agent.invoke("Generate 2 Random XTP Programs and Bin2Bin Matrix File correlating the 2 Programs")
         log.append("✓ Generator finished.")
         return {**state, "generator_output": generator_output, "log": log}
     except Exception as exc:  # noqa: BLE001

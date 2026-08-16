@@ -30,7 +30,7 @@ Generate two valid XTP test program scripts (`Program A` and `Program B`) featur
 
 1. TOOL EXECUTION FIRST:
    - Call `select_random_xtp_delta()` to select the specific block modification (`LEVELS`, `TIMING`, or `PARAMETRICS`).
-   - Call `generate_bin2bin_csv()` to compute and save the Bin2Bin matrix to disk. This tool handles the matrix entirely — do NOT describe, reproduce, or comment on its output.
+   - Call `generate_bin2bin_csv()` to compute the Bin2Bin matrix. The tool returns the CSV content under the `CSV_CONTENT:` marker — you MUST include it verbatim in your output (step 3).
    - Call `find_xtp_documents` to retrieve relevant XTP syntax examples before writing the programs.
 
 2. PROGRAM GENERATION:
@@ -38,9 +38,11 @@ Generate two valid XTP test program scripts (`Program A` and `Program B`) featur
    - Ensure both programs contain all 6 mandatory XTP structural blocks: `PINMAP`, `LEVELS`, `TIMING`, `PARAMETRICS`, `FUNCTIONS`, `BINNING`.
    - Embed the target parameter delta explicitly inside Program B's modified block.
 
-3. OUTPUT — XTP PROGRAMS ONLY:
-   - Output ONLY **Program A** and **Program B** in standard code blocks. Nothing else.
-   - Do NOT include any matrix, table, analysis, summary, physical effect, key transitions, or correlation. The matrix is already saved by the tool.
+3. OUTPUT FORMAT — output all three blocks in this exact order, nothing else:
+   - Program A in a fenced code block labelled ` ```xtp `.
+   - Program B in a fenced code block labelled ` ```xtp `.
+   - The Bin2Bin CSV content (everything after `CSV_CONTENT:` in the tool result) in a fenced code block labelled ` ```csv `.
+   - Do NOT add any explanation, commentary, summary, or extra text outside these three blocks.
 
 ### XTP SYNTAX REFERENCE
 ```xtp
@@ -139,13 +141,17 @@ class XTPGeneratorAgent:
                 ["SB_4001_TimingFail",0,             0,            0,              timing_fail_a ],
             ]
 
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerows(rows)
+            csv_content = buf.getvalue()
+
             os.makedirs(output_folder, exist_ok=True)
             csv_path = os.path.join(output_folder, "Bin2Bin_Matrix.csv")
             with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerows(rows)
+                f.write(csv_content)
 
-            return f"CSV written to {csv_path}"
+            return f"CSV_PATH:{csv_path}\nCSV_CONTENT:\n{csv_content}"
 
         @tool
         def select_random_xtp_delta() -> str:

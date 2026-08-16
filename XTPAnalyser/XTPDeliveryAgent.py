@@ -1,11 +1,13 @@
 """
 XTPDeliveryAgent — Parses combined generator output and saves files to disk.
 
-Extracts Program A (XTP), Program B (XTP), and the Bin2Bin report from the
-upstream generator response and writes each as a standalone file.
+Extracts Program A (XTP), Program B (XTP), and the Bin2Bin CSV matrix from
+the upstream generator response and writes each as a standalone file.
 """
 
 import os
+import re
+from datetime import datetime
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
@@ -14,35 +16,39 @@ from langchain_openai import ChatOpenAI
 from Helpers.Logger import AgentLogger
 
 _SYSTEM_PROMPT = """
-You are an expert Automation & File System Management Agent responsible for parsing generator output and saving XTP program files to disk.
+You are a File System Management Agent. Your only job is to save three pre-extracted assets to disk.
 
-### CORE OBJECTIVE
-Extract exactly two XTP test program scripts from the provided input and save each as a standalone file.
+### WORKFLOW — follow these steps in order
 
-### WORKFLOW & PARSING RULES
+1. Call `get_timestamp` once. Use the returned string as `<TS>` for all three file names.
 
-1. ASSET IDENTIFICATION & SANITIZATION:
-   - File 1 (Program A XTP): Extract the first XTP test program script. Strip markdown code fence markers (e.g., ```xtp) so only the raw XTP code remains.
-   - File 2 (Program B XTP): Extract the second XTP test program script. Strip markdown code fence markers.
+2. Call `write_file_to_disk` with the PROGRAM_A content provided → file name `Program_A_<TS>.xtp`
 
-2. FILE SYSTEM EXECUTION:
-   - Call `write_file_to_disk` twice — once for each program.
-   - Naming convention: `Program_A.xtp` and `Program_B.xtp`.
-   - Do NOT write any Bin2Bin or matrix file — that is handled separately.
+3. Call `write_file_to_disk` with the PROGRAM_B content provided → file name `Program_B_<TS>.xtp`
 
-3. BEHAVIOR & OUTPUT FORMATTING:
-   - Execute file writing deterministically using available tools.
-   - Do NOT output conversational greetings or verbose confirmations.
-   - Confirm the two files saved with their paths and sizes. Nothing else.
+4. Call `write_csv_to_disk` with the BIN2BIN_CSV content provided → file name `Bin2Bin_<TS>.csv`
+   - Pass the CSV content EXACTLY as given. Do NOT truncate, summarise, or reformat it.
+
+5. Reply with the three saved file paths and their byte sizes. Nothing else.
 """
 
 
 class XTPDeliveryAgent:
     """Parses a combined XTP generator response and saves each asset
-    (Program A, Program B, Bin2Bin report) to the local file system."""
+    (Program A, Program B, Bin2Bin CSV) to the local file system."""
 
     def __init__(self, logger: AgentLogger | None = None):
         self._log = logger or AgentLogger(name="xtp_delivery_agent", level="DEBUG")
+
+        @tool
+        def get_timestamp() -> str:
+            """
+            Returns the current local date and time as a compact string suitable
+            for use in file names (e.g., '20250115_143022').
+
+            No parameters required.
+            """
+            return datetime.now().strftime("%Y%m%d_%H%M%S")
 
         @tool
         def write_file_to_disk(folder_path: str, file_name: str, content: str) -> str:
@@ -72,6 +78,31 @@ class XTPDeliveryAgent:
             except Exception as e:
                 return f"ERROR: Failed to write file {file_name}. Details: {str(e)}"
 
+        @tool
+        def write_csv_to_disk(folder_path: str, file_name: str, content: str) -> str:
+            """
+            Saves raw CSV text to a specified directory on the local file system.
+            Creates target directories automatically if they do not exist.
+
+            Parameters:
+            - folder_path: Target directory path (e.g., './output_xtp/').
+            - file_name: Target filename (e.g., 'Bin2Bin_20250115_143022.csv').
+            - content: The raw CSV string (no markdown fences, just header + data rows).
+            """
+            try:
+                import re as _re
+                content = _re.sub(r"^```[^\n]*\n", "", content.lstrip("\n"))
+                content = _re.sub(r"\n```\s*$", "", content)
+                content = content.strip("\n") + "\n"
+                os.makedirs(folder_path, exist_ok=True)
+                full_path = os.path.join(folder_path, file_name)
+                with open(full_path, "w", encoding="utf-8", newline="") as f:
+                    f.write(content)
+                file_size = os.path.getsize(full_path)
+                return f"SUCCESS: Written {file_size} bytes to {full_path}"
+            except Exception as e:
+                return f"ERROR: Failed to write file {file_name}. Details: {str(e)}"
+
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
@@ -82,16 +113,65 @@ class XTPDeliveryAgent:
         self._agent = create_agent(
             model=model,
             system_prompt=_SYSTEM_PROMPT,
-            tools=[write_file_to_disk],
+            tools=[get_timestamp, write_file_to_disk, write_csv_to_disk],
             debug=False,
         )
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_blocks(text: str) -> tuple[str, str, str]:
+        """Extract Program A, Program B, and the Bin2Bin CSV from *text*.
+
+        The generator emits three fenced code blocks in order:
+          1. ```xtp  … ```   — Program A
+          2. ```xtp  … ```   — Program B
+          3. ```csv  … ```   — Bin2Bin matrix
+
+        Returns (prog_a, prog_b, csv_content).  Raises ValueError if any
+        block cannot be found.
+        """
+        xtp_blocks = re.findall(r"```xtp\s*\n(.*?)```", text, re.DOTALL)
+        csv_blocks = re.findall(r"```csv\s*\n(.*?)```", text, re.DOTALL)
+
+        if len(xtp_blocks) < 2:
+            raise ValueError(
+                f"Expected 2 ```xtp blocks in generator output, found {len(xtp_blocks)}."
+            )
+        if not csv_blocks:
+            raise ValueError("No ```csv block found in generator output.")
+
+        return xtp_blocks[0].strip(), xtp_blocks[1].strip(), csv_blocks[0].strip()
+
+    # ------------------------------------------------------------------
+    # Invocation
+    # ------------------------------------------------------------------
+
     def invoke(self, generator_output: str, output_folder: str = "Programas") -> str:
-        """Parse *generator_output* and save Program A and Program B to *output_folder*."""
-        message = (
-            f"Extract Program A and Program B from the following generator output "
-            f"and save each as an .xtp file in the `{output_folder}` folder: {generator_output}"
-        )
+        """Parse *generator_output*, extract assets in Python, then instruct
+        the agent to save all three files to *output_folder*."""
+
         self._log._logger.info("[XTPDeliveryAgent] Saving assets to: %s", output_folder)
+
+        try:
+            prog_a, prog_b, csv_content = self._extract_blocks(generator_output)
+        except ValueError as exc:
+            self._log._logger.error("[XTPDeliveryAgent] Extraction failed: %s", exc)
+            return f"ERROR: {exc}"
+
+        self._log._logger.debug(
+            "[XTPDeliveryAgent] Extracted blocks — A: %d chars, B: %d chars, CSV: %d chars",
+            len(prog_a), len(prog_b), len(csv_content),
+        )
+
+        message = (
+            f"Save these three assets to the `{output_folder}` folder.\n\n"
+            f"PROGRAM_A:\n{prog_a}\n\n"
+            f"PROGRAM_B:\n{prog_b}\n\n"
+            f"BIN2BIN_CSV:\n{csv_content}"
+        )
+
         result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
         return result["messages"][-1].content

@@ -7,8 +7,8 @@ Import `agent` from this module wherever you need to invoke the agent.
 
 import os
 
-import Agent
-from Rag import RagCore
+from . import Agent
+from .Rag import RagCore
 from Helpers.Logger import AgentLogger
 from langchain.tools import tool
 

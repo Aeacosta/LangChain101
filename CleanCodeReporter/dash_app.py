@@ -14,7 +14,7 @@ import dash
 from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
-from agent_setup import agent
+from . import GraphAgent
 from Helpers.FilePatcher import preview_patch, apply_fixes
 
 # ── File discovery ────────────────────────────────────────────────────────────
@@ -179,14 +179,15 @@ def run_analysis(_n_clicks, dropdown_val, custom_val):
             {"display": "none"},
         )
 
-    raw = agent.call_agent(f"Que Code Smells detectas en este archivo? {file_path}")
+    final_state = GraphAgent.run(file_path)
+    result = final_state.get("report", {})
 
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
+    if not result:
+        error = final_state.get("error", "unknown error")
+        raw   = final_state.get("report_json") or final_state.get("raw_response", "")
         return (
             dbc.Alert(
-                [html.Strong("Agent returned invalid JSON. Raw output:"), html.Pre(raw)],
+                [html.Strong(f"Graph returned no report. Error: {error}"), html.Pre(raw)],
                 color="danger",
             ),
             None,

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
-import Rag
+from . import Rag
 from Helpers.Logger import AgentLogger
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
 from Helpers.ScorerAgent import ScorerAgent

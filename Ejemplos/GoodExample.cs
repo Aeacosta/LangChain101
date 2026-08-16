@@ -9,11 +9,14 @@ public static class InvoiceCalculator
     /// Calcula el total de una factura sumando cantidad * precio unitario de cada ítem.
     /// </summary>
     public static decimal CalculateTotal(IEnumerable<InvoiceItem> items) =>
-        items.Sum(item => item.Quantity * item.UnitPrice);
+        items.Sum(item => item.Subtotal);
 
     /// <summary>
     /// Indica si el total dado supera el umbral para aplicar un descuento.
     /// </summary>
-    public static bool IsEligibleForDiscount(decimal total) =>
-        total > DiscountThreshold;
+    public sealed class DiscountPolicy
+    {
+        private readonly decimal _threshold = DiscountThreshold;
+        public bool IsEligibleForDiscount(decimal total) => total > _threshold;
+    }
 }

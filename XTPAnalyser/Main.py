@@ -13,11 +13,11 @@ import os
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from XTPAnalyser.XTPProgramDiffAgent import XTPProgramDiffAgent
-from XTPAnalyser.CompareFiles import XTPFileComparer
-from XTPAnalyser.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
-from XTPAnalyser.XTPMismatchJustificationAgent import XTPMismatchJustificationAgent
-from XTPAnalyser.XTPTableExtractor import XTPTableExtractor
+from XTPAnalyser.Agents.XTPProgramDiffAgent import XTPProgramDiffAgent
+from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
+from XTPAnalyser.Agents.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
+from XTPAnalyser.Agents.XTPMismatchJustificationAgent import XTPMismatchJustificationAgent
+from XTPAnalyser.Agents.XTPTableExtractor import XTPTableExtractor
 
 # ---------------------------------------------------------------------------
 # Bootstrap

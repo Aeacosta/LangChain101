@@ -58,7 +58,7 @@ class XTPTableExtractor:
     -----
     ::
 
-        from XTPAnalyser.XTPTableExtractor import XTPTableExtractor
+        from XTPAnalyser.Agents.XTPTableExtractor import XTPTableExtractor
 
         extractor = XTPTableExtractor()
         df = extractor.extract(justification_table_text)

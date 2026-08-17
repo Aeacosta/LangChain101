@@ -237,9 +237,9 @@ class XTPMismatchJustificationAgent:
 
 if __name__ == "__main__":
     import sys
-    from XTPAnalyser.CompareFiles import XTPFileComparer
-    from XTPAnalyser.XTPProgramDiffAgent import XTPProgramDiffAgent
-    from XTPAnalyser.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
+    from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
+    from XTPAnalyser.Agents.XTPProgramDiffAgent import XTPProgramDiffAgent
+    from XTPAnalyser.Agents.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
 
     _logger = AgentLogger(name="xtp_mismatch_agent", level="DEBUG")
 

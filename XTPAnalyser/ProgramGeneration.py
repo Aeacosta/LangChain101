@@ -13,7 +13,7 @@ import os
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from XTPAnalyser.XTPExpertAgent import XTPExpertAgent
+from XTPAnalyser.Agents.XTPExpertAgent import XTPExpertAgent
 from XTPAnalyser.graph import XTPState, build_graph
 
 # ---------------------------------------------------------------------------

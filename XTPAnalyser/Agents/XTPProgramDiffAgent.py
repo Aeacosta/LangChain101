@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
 from RAG.xtp_rag import XTPRagCore
-from XTPAnalyser.CompareFiles import XTPFileComparer
+from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
 
 from dotenv import load_dotenv
 

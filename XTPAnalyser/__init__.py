@@ -1,6 +1,6 @@
 # XTPAnalyser package
-from XTPAnalyser.XTPExpertAgent import XTPExpertAgent
-from XTPAnalyser.XTPGeneratorAgent import XTPGeneratorAgent
-from XTPAnalyser.XTPDeliveryAgent import XTPDeliveryAgent
+from XTPAnalyser.Agents.XTPExpertAgent import XTPExpertAgent
+from XTPAnalyser.Agents.XTPGeneratorAgent import XTPGeneratorAgent
+from XTPAnalyser.Agents.XTPDeliveryAgent import XTPDeliveryAgent
 
 __all__ = ["XTPExpertAgent", "XTPGeneratorAgent", "XTPDeliveryAgent"]

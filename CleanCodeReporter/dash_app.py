@@ -43,7 +43,7 @@ app.layout = dbc.Container(
     [
         html.H2("Code Smell Analyzer", className="mt-4 mb-1"),
         html.P(
-            "Select a file from the dropdown or type a custom path, then click Analyze.",
+            "Select a file from the dropdown, type a custom path, or paste a GitHub URL, then click Analyze.",
             className="text-muted mb-4",
         ),
 
@@ -69,6 +69,24 @@ app.layout = dbc.Container(
                 dbc.Col(
                     dbc.Button("Analyze", id="btn-analyze", color="primary", n_clicks=0),
                     width=2,
+                ),
+            ],
+            className="mb-3",
+        ),
+
+        dbc.Row(
+            [
+                dbc.Col(
+                    html.Div([
+                        html.Span("GitHub", className="input-group-text",
+                                  style={"fontSize": "0.85rem"}),
+                        dbc.Input(
+                            id="file-github",
+                            placeholder="https://github.com/user/repo/blob/main/File.cs",
+                            type="url",
+                        ),
+                    ], className="input-group"),
+                    width=12,
                 ),
             ],
             className="mb-3",
@@ -168,10 +186,14 @@ app.layout = dbc.Container(
     Input("btn-analyze", "n_clicks"),
     State("file-dropdown", "value"),
     State("file-custom",   "value"),
+    State("file-github",   "value"),
     prevent_initial_call=True,
 )
-def run_analysis(_n_clicks, dropdown_val, custom_val):
-    file_path = (custom_val or "").strip() or (dropdown_val or "").strip()
+def run_analysis(_n_clicks, dropdown_val, custom_val, github_val):
+    github_url = (github_val or "").strip()
+    # GitHub URL takes precedence; fall back to custom path then dropdown.
+    file_path  = github_url or (custom_val or "").strip() or (dropdown_val or "").strip()
+
     if not file_path:
         return (
             dbc.Alert("Please select or enter a file path before analyzing.", color="warning"),

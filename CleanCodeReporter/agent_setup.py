@@ -6,7 +6,9 @@ Import `agent` from this module wherever you need to invoke the agent.
 """
 
 import os
+import urllib.parse
 
+import requests
 from . import Agent
 from .Rag import RagCore
 from Helpers.Logger import AgentLogger
@@ -37,6 +39,32 @@ def read_local_file(file_path: str) -> str:
             return fh.read()
     except Exception as exc:
         return f"Error reading file: {exc}"
+
+
+@tool
+def read_github_url(url: str) -> str:
+    """
+    Fetches the raw source code of a file hosted on GitHub given its URL.
+    Accepts both standard GitHub blob URLs
+    (https://github.com/<user>/<repo>/blob/<branch>/<path>)
+    and direct raw URLs (https://raw.githubusercontent.com/...).
+    Use this tool whenever the file to analyse is a GitHub URL instead of a local path.
+    """
+    url = url.strip()
+    # Convert blob URL to raw URL if needed.
+    if "raw.githubusercontent.com" not in url:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.netloc == "github.com":
+            path = parsed.path.replace("/blob/", "/", 1)
+            url = urllib.parse.urlunparse(
+                ("https", "raw.githubusercontent.com", path, "", "", "")
+            )
+    try:
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        return response.text
+    except requests.RequestException as exc:
+        return f"Error fetching GitHub URL: {exc}"
 
 
 _SYSTEM_PROMPT = """
@@ -169,4 +197,4 @@ DO NOT describe this validation in your response.
 Perform the validation internally and then output ONLY the final JSON object.
 """
 
-agent = Agent.Agent(_SYSTEM_PROMPT, [find_documents, read_local_file], logger=log)
+agent = Agent.Agent(_SYSTEM_PROMPT, [find_documents, read_local_file, read_github_url], logger=log)

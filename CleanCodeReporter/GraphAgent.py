@@ -63,9 +63,16 @@ def read_file_node(state: GraphState) -> dict:
     file_path = state["file_path"]
     _log._logger.info("📂 read_file_node — analyzing: %s", file_path)
 
-    raw = _agent.call_agent(
-        f"Que Code Smells detectas en este archivo? {file_path}"
-    )
+    is_url = file_path.startswith("http://") or file_path.startswith("https://")
+    if is_url:
+        prompt = (
+            f"Que Code Smells detectas en el archivo disponible en esta URL de GitHub? "
+            f"Usa la herramienta read_github_url para obtener el contenido. URL: {file_path}"
+        )
+    else:
+        prompt = f"Que Code Smells detectas en este archivo? {file_path}"
+
+    raw = _agent.call_agent(prompt)
 
     _log._logger.debug("read_file_node — raw response length: %d", len(raw))
 

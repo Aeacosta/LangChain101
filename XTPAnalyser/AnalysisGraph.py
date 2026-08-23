@@ -49,6 +49,8 @@ class XTPAnalysisState(TypedDict, total=False):
     response_bin2bin: str
     justification_table: str
     mismatch_df_json: str   # DataFrame serialised as JSON for the UI
+    pr_links_json: str      # enriched DataFrame (+ pr_numbers/pr_titles) as JSON
+    pr_summary_md: str      # Markdown table linking each mismatch to PR(s)
     error: str
 
 
@@ -163,6 +165,39 @@ def _extract_justification_table_node(state: XTPAnalysisState) -> XTPAnalysisSta
         return {**state, "error": str(exc)}
 
 
+def _link_prs_to_justifications_node(state: XTPAnalysisState) -> XTPAnalysisState:
+    """Enrich the mismatch DataFrame with matching GitHub PR numbers/titles."""
+    from XTPAnalyser.Agents.XTPPRLinkerAgent import XTPPRLinkerAgent  # lazy import
+    import io
+    import pandas as pd
+
+    if state.get("error"):
+        return state
+
+    mismatch_df_json = state.get("mismatch_df_json", "")
+    if not mismatch_df_json:
+        return {**state, "error": "No mismatch DataFrame available for PR linking."}
+
+    log: AgentLogger = state["log"]
+    log._logger.info("▶ Initialising XTP PR Linker Agent …")
+
+    df = pd.read_json(io.StringIO(mismatch_df_json))
+    agent = XTPPRLinkerAgent(logger=log)
+    result = agent.link(df, sha_a=state.get("sha_a", ""), sha_b=state.get("sha_b", ""))
+
+    if result["error"]:
+        log._logger.warning("PR linking failed: %s", result["error"])
+        return {**state, "error": result["error"]}
+
+    log._logger.info("✓ XTP PR Linker Agent finished.")
+    log._logger.info("=== PR-Linked Summary ===\n%s", result["summary_md"])
+    return {
+        **state,
+        "pr_links_json": result["enriched_df"].to_json(orient="records"),
+        "pr_summary_md": result["summary_md"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Graph factory
 # ---------------------------------------------------------------------------
@@ -186,17 +221,19 @@ def build_analysis_graph(logger: AgentLogger | None = None):
         logger = AgentLogger(name="xtp_analysis", level="INFO")
 
     g = StateGraph(XTPAnalysisState)
-    g.add_node("fetch_programs",              _fetch_programs_node)
-    g.add_node("generate_diff",               _generate_xtp_diff_node)
-    g.add_node("analize_bin2bin",             _analyze_bin2bin_node)
-    g.add_node("justify_mismatches",          _justify_mismatches_node)
-    g.add_node("extract_justification_table", _extract_justification_table_node)
+    g.add_node("fetch_programs",                _fetch_programs_node)
+    g.add_node("generate_diff",                 _generate_xtp_diff_node)
+    g.add_node("analize_bin2bin",               _analyze_bin2bin_node)
+    g.add_node("justify_mismatches",            _justify_mismatches_node)
+    g.add_node("extract_justification_table",   _extract_justification_table_node)
+    g.add_node("link_prs_to_justifications",    _link_prs_to_justifications_node)
 
-    g.add_edge(START,                         "fetch_programs")
-    g.add_edge("fetch_programs",              "generate_diff")
-    g.add_edge("generate_diff",               "analize_bin2bin")
-    g.add_edge("analize_bin2bin",             "justify_mismatches")
-    g.add_edge("justify_mismatches",          "extract_justification_table")
-    g.add_edge("extract_justification_table", END)
+    g.add_edge(START,                           "fetch_programs")
+    g.add_edge("fetch_programs",                "generate_diff")
+    g.add_edge("generate_diff",                 "analize_bin2bin")
+    g.add_edge("analize_bin2bin",               "justify_mismatches")
+    g.add_edge("justify_mismatches",            "extract_justification_table")
+    g.add_edge("extract_justification_table",   "link_prs_to_justifications")
+    g.add_edge("link_prs_to_justifications",    END)
 
     return g.compile()

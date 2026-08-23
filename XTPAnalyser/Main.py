@@ -60,6 +60,9 @@ final = pipeline.invoke(initial)
 # Print results
 # ---------------------------------------------------------------------------
 
+import io
+import pandas as pd
+
 log._logger.info("=== XTP Program Diff Agent ===")
 log._logger.info(final.get("response_xtp_diff", "(no diff report)"))
 
@@ -70,11 +73,18 @@ log._logger.info("=== XTP Mismatch Justification Agent ===")
 log._logger.info(final.get("justification_table", "(no justification table)"))
 
 if final.get("mismatch_df_json"):
-    import json
-    import io
-    import pandas as pd
     mismatch_df = pd.read_json(io.StringIO(final["mismatch_df_json"]))
     log._logger.info("=== Mismatch Justification DataFrame ===")
     log._logger.info("\n%s", mismatch_df.to_string(index=False))
-elif final.get("error"):
-    log._logger.warning("Could not extract table: %s", final["error"])
+
+if final.get("pr_summary_md"):
+    log._logger.info("=== PR-Linked Justification Summary ===")
+    log._logger.info("\n%s", final["pr_summary_md"])
+
+if final.get("pr_links_json"):
+    pr_df = pd.read_json(io.StringIO(final["pr_links_json"]))
+    log._logger.info("=== PR-Linked DataFrame ===")
+    log._logger.info("\n%s", pr_df.to_string(index=False))
+
+if final.get("error"):
+    log._logger.warning("Pipeline error: %s", final["error"])

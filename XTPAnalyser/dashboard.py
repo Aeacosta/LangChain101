@@ -58,6 +58,7 @@ _anl_lock  = threading.Lock()
 _anl_state: dict  = {
     "running": False, "log": [], "done": False, "error": None,
     "mismatch_json": None, "justification_text": None,
+    "pr_links_json": None, "pr_summary_md": None,
     "sha_a": "", "sha_b": "",
     "program_a": None, "program_b": None, "diff": None,
 }
@@ -901,6 +902,7 @@ def anl_start(_n, sha_a, sha_b, text_bin):
         _anl_state.update({
             "running": True, "log": [], "done": False,
             "error": None, "mismatch_json": None, "justification_text": None,
+            "pr_links_json": None, "pr_summary_md": None,
             "sha_a": sha_a.strip(), "sha_b": sha_b.strip(),
             "program_a": None, "program_b": None, "diff": None,
         })
@@ -1029,6 +1031,8 @@ def _run_anl_pipeline(sha_a: str, sha_b: str, path_bin: str) -> None:
         with _anl_lock:
             _anl_state["mismatch_json"]      = final.get("mismatch_df_json")
             _anl_state["justification_text"] = final.get("justification_table")
+            _anl_state["pr_links_json"]      = final.get("pr_links_json")
+            _anl_state["pr_summary_md"]      = final.get("pr_summary_md")
             _anl_state["error"]              = final.get("error")
             _anl_state["program_a"]          = final.get("program_a")
             _anl_state["program_b"]          = final.get("program_b")
@@ -1056,9 +1060,22 @@ def _log_class(line: str) -> str:
     return "log-line"
 
 
+# Column display config: (id, label, markdown)
+_MISMATCH_COLS = [
+    ("prog_a_bin",        "Prog A Bin",   False),
+    ("prog_b_bin",        "Prog B Bin",   False),
+    ("count",             "Count",        False),
+    ("pct_of_src",        "% of Src",     False),
+    ("direction",         "Direction",    False),
+    ("most_likely_cause", "Most Likely Cause", False),
+    ("confidence",        "Confidence",   False),
+    ("pr_links",          "PR(s)",        True),   # clickable hyperlinks
+]
+
+
 def _build_results(state: dict) -> html.Div:
     """Render the analysis results panel from pipeline final state."""
-    if state.get("error") and not state.get("mismatch_json"):
+    if state.get("error") and not state.get("mismatch_json") and not state.get("pr_links_json"):
         return html.Div([
             html.H4("⚠ Analysis Warning"),
             html.Pre(state["error"], className="results-warning"),
@@ -1066,14 +1083,30 @@ def _build_results(state: dict) -> html.Div:
 
     children: list = [html.H4("🔬 Mismatch Justification Table")]
 
-    raw_json = state.get("mismatch_json")
+    # Prefer the PR-enriched JSON (contains pr_links column); fall back to plain mismatch JSON
+    raw_json = state.get("pr_links_json") or state.get("mismatch_json")
+
     if raw_json:
         rows = json.loads(raw_json)
         if rows:
-            cols = list(rows[0].keys())
+            available = set(rows[0].keys())
+            # Build column list: use configured display order, skip absent columns
+            col_defs = [
+                {"name": label, "id": col_id, "presentation": "markdown"}
+                if use_md else
+                {"name": label, "id": col_id}
+                for col_id, label, use_md in _MISMATCH_COLS
+                if col_id in available
+            ]
+            # Append any extra columns not in the config (future-proof)
+            known_ids = {c[0] for c in _MISMATCH_COLS}
+            for extra in rows[0].keys():
+                if extra not in known_ids:
+                    col_defs.append({"name": extra, "id": extra})
+
             children.append(
                 dash_table.DataTable(
-                    columns=[{"name": c, "id": c} for c in cols],
+                    columns=col_defs,
                     data=rows,
                     style_table={"overflowX": "auto"},
                     style_header={
@@ -1093,7 +1126,9 @@ def _build_results(state: dict) -> html.Div:
                          "color": "#fbbf24"},
                         {"if": {"column_id": "confidence", "filter_query": '{confidence} = "LOW"'},
                          "color": "#f87171"},
+                        {"if": {"column_id": "pr_links"}, "color": "#60a5fa"},
                     ],
+                    markdown_options={"html": False, "link_target": "_blank"},
                     page_size=20,
                 )
             )

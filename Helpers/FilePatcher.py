@@ -36,7 +36,14 @@ def _parse_hunks(diff_text: str) -> list[tuple[list[str], list[str]]]:
     """Parse a unified diff string into (removed_lines, added_lines) hunk pairs.
 
     Each element is one @@ hunk.  Lines are kept without trailing newline.
+
+    Handles diffs where the LLM emitted literal ``\\n`` escape sequences instead
+    of real newline characters (a common LLM output artefact).
     """
+    # Normalise literal \n sequences → real newlines so splitlines() works.
+    if "\n" not in diff_text and "\\n" in diff_text:
+        diff_text = diff_text.replace("\\n", "\n")
+
     hunks: list[tuple[list[str], list[str]]] = []
     removed: list[str] = []
     added: list[str] = []
@@ -63,8 +70,12 @@ def _parse_hunks(diff_text: str) -> list[tuple[list[str], list[str]]]:
 def _apply_hunks(
     source_lines: list[str],
     hunks: list[tuple[list[str], list[str]]],
+    eol: str = "\n",
 ) -> tuple[list[str], list[str]]:
     """Apply hunks to source_lines using a sliding window search.
+
+    ``eol`` is appended to every replacement line so the patched file
+    preserves the original line endings (``\\n`` or ``\\r\\n``).
 
     Returns (result_lines, errors).
     """
@@ -74,16 +85,17 @@ def _apply_hunks(
     for removed, added in hunks:
         if not removed:
             # Pure insertion — append at end (best effort)
-            result.extend(added)
+            result.extend(l + eol for l in added)
             continue
 
-        # Search for the removed block inside result (sliding window)
+        # Search for the removed block inside result (sliding window).
+        # Strip ALL trailing whitespace (handles \n and \r\n uniformly).
         found = False
         for i in range(len(result) - len(removed) + 1):
-            window = [l.rstrip("\n") for l in result[i:i + len(removed)]]
-            needle = [l.rstrip("\n") for l in removed]
+            window = [l.rstrip() for l in result[i:i + len(removed)]]
+            needle = [l.rstrip() for l in removed]
             if window == needle:
-                result[i:i + len(removed)] = [l + "\n" for l in added]
+                result[i:i + len(removed)] = [l + eol for l in added]
                 found = True
                 break
 
@@ -91,6 +103,11 @@ def _apply_hunks(
             errors.append(f"Could not apply hunk removing: {removed[:1]!r}…")
 
     return result, errors
+
+
+def _detect_eol(text: str) -> str:
+    """Return ``'\\r\\n'`` if the text uses CRLF, else ``'\\n'``."""
+    return "\r\n" if "\r\n" in text else "\n"
 
 
 def preview_patch(report: dict) -> PatchResult | None:
@@ -105,6 +122,7 @@ def preview_patch(report: dict) -> PatchResult | None:
     with open(file_path, encoding="utf-8") as fh:
         original = fh.read()
 
+    eol          = _detect_eol(original)
     source_lines = original.splitlines(keepends=True)
     all_errors: list[str] = []
 
@@ -113,7 +131,7 @@ def preview_patch(report: dict) -> PatchResult | None:
         if not diff_text:
             continue
         hunks = _parse_hunks(diff_text)
-        source_lines, errs = _apply_hunks(source_lines, hunks)
+        source_lines, errs = _apply_hunks(source_lines, hunks, eol=eol)
         all_errors.extend(errs)
 
     patched = "".join(source_lines)

@@ -1,31 +1,17 @@
 using System;
 
-public class ShippingCalculator
-{
-    public decimal CalculateShipping(decimal orderTotal)
-    {
-        if (orderTotal > 100)
-        {
-            return 0;
-        }
-
-        if (orderTotal > 50)
-        {
-            return 5;
-        }
-
-        return 12;
-    }
-}
-
 public class Program
 {
     public static void Main()
     {
         var calculator = new ShippingCalculator();
 
-        Console.WriteLine(calculator.CalculateShipping(120)); // 0
-        Console.WriteLine(calculator.CalculateShipping(75));  // 5
-        Console.WriteLine(calculator.CalculateShipping(30));  // 12
+    private const int LargeOrderAmount = 120;
+    private const int MediumOrderAmount = 75;
+    private const int SmallOrderAmount = 30;
+
+        Console.WriteLine(calculator.CalculateShipping(LargeOrderAmount));  // 0
+        Console.WriteLine(calculator.CalculateShipping(MediumOrderAmount)); // 5
+        Console.WriteLine(calculator.CalculateShipping(SmallOrderAmount));  // 12
     }
 }

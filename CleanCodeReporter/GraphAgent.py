@@ -8,7 +8,7 @@ Flow (mirrors the Mermaid diagram):
                   ├─ No ──► Leer Archivos   (retry loop)
                   └─ Sí ──► Extraer Reporte
                               ├──► Calificar Reporte  ─┐
-                              └──► Escribir Archivo   ─┴─► Merge ──► Fin
+                              └──► Escribir Archivo   ─┴─► Merge ──► Crear PR? ──► Fin
 
 Nodes
 -----
@@ -19,6 +19,7 @@ extract_report_node — assembles the final report dict (injects prompt_response
 score_report_node   — runs the scorer; writes score_json only.
 patch_file_node     — applies unified diffs and writes the corrected file; writes patched only.
 merge_node          — recombines score_json into report.scoreReport after the parallel branches.
+create_pr_node      — creates a GitHub branch + PR when the file belongs to a tracked repo.
 
 LangGraph rule: nodes that run in parallel (fan-out from the same parent) must
 write to **disjoint** state keys.  score_report_node owns `score_json`; patch_file_node
@@ -33,6 +34,7 @@ import json
 from langgraph.graph import END, START, StateGraph
 
 from .agent_setup import agent as _agent
+from .GithubPRAgent import create_pull_request_sync, resolve_repo
 from Helpers.FilePatcher import apply_fixes
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
 from Helpers.Logger import AgentLogger
@@ -180,6 +182,31 @@ def merge_node(state: GraphState) -> dict:
         return {}
 
 
+def create_pr_node(state: GraphState) -> dict:
+    """Node: Crear PR.
+
+    Creates a feature branch containing only the patched file, then opens a
+    pull request on GitHub.  Only runs when the analysed file belongs to one
+    of the tracked repos (Aeacosta/LangChain101 or
+    Aeacosta-CenfoTec/CodeSmellExamples).
+
+    Writes ONLY `pr_url`.
+    """
+    file_path = state.get("file_path", "")
+    report    = state.get("report", {})
+
+    _log._logger.info("🐙 create_pr_node — file: %s", file_path)
+
+    pr_url = create_pull_request_sync(report, file_path)
+
+    if pr_url and pr_url.startswith("https://github.com"):
+        _log._logger.info("create_pr_node — PR created: %s", pr_url)
+    else:
+        _log._logger.warning("create_pr_node — unexpected response: %s", pr_url)
+
+    return {"pr_url": pr_url}
+
+
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
@@ -190,6 +217,16 @@ def route_json_valid(state: GraphState) -> str:
     Returns 'valid' when the JSON parsed successfully, 'retry' otherwise.
     """
     return "valid" if state.get("valid_json") else "retry"
+
+
+def route_create_pr(state: GraphState) -> str:
+    """Conditional edge after merge_node.
+
+    Returns 'create_pr' when the file belongs to a tracked GitHub repo,
+    'skip_pr' otherwise.
+    """
+    file_path = state.get("file_path", "")
+    return "create_pr" if resolve_repo(file_path) is not None else "skip_pr"
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +243,7 @@ def build_graph() -> StateGraph:
     graph.add_node("score_report",   score_report_node)
     graph.add_node("patch_file",     patch_file_node)
     graph.add_node("merge",          merge_node)
+    graph.add_node("create_pr",      create_pr_node)
 
     # Edges — matches the Mermaid flowchart exactly
     graph.add_edge(START,            "read_file")
@@ -222,10 +260,17 @@ def build_graph() -> StateGraph:
     graph.add_edge("extract_report", "score_report")
     graph.add_edge("extract_report", "patch_file")
 
-    # Fan-in: both branches converge at merge, then finish
+    # Fan-in: both branches converge at merge
     graph.add_edge("score_report",   "merge")
     graph.add_edge("patch_file",     "merge")
-    graph.add_edge("merge",          END)
+
+    # Conditional: create PR only for tracked repos
+    graph.add_conditional_edges(
+        "merge",
+        route_create_pr,
+        {"create_pr": "create_pr", "skip_pr": END},
+    )
+    graph.add_edge("create_pr", END)
 
     return graph
 
@@ -249,5 +294,6 @@ def run(file_path: str) -> dict:
         "patched":      False,
         "valid_json":   False,
         "error":        "",
+        "pr_url":       "",
     }
     return compiled_graph.invoke(initial_state)

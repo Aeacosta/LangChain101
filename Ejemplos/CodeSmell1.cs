@@ -1,21 +1,14 @@
 using System;
+// Asegurar los using/definiciones para IUserRepository, IEmailService y User
 
 public class UserManager
 {
     public void RegisterUser(string name, string email)
     {
-        // Validation
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Name is required.");
+        Validate(name, email);
 
-        if (!email.Contains("@"))
-            throw new ArgumentException("Invalid email.");
-
-        // Save user (simulated)
-        _logger.Log(string.Format(Messages.SaveUser, user.Name));
-
-        // Send welcome email
-        _logger.Log(string.Format(Messages.SendWelcomeEmail, user.Email));
+        _userRepository.Save(user);
+        _emailService.SendWelcome(user);
     }
 }
 
@@ -26,4 +19,4 @@ public class Program
         var userManager = new UserManager();
         userManager.RegisterUser("Alice", "alice@example.com");
     }
-}
+}        var user = new User(name, email);    private readonly IUserRepository _userRepository;    private readonly IEmailService _emailService;    public UserManager(IUserRepository userRepository, IEmailService emailService)    {        _userRepository = userRepository;        _emailService = emailService;    }    private readonly IUserRepository _userRepository;    private readonly IEmailService _emailService;    public UserManager(IUserRepository userRepository, IEmailService emailService)    {        _userRepository = userRepository;        _emailService = emailService;    }        var user = new User(name, email);    private void Validate(string name, string email)    {        if (string.IsNullOrWhiteSpace(name))            throw new ArgumentException("El nombre es obligatorio", nameof(name));        if (string.IsNullOrWhiteSpace(email))            throw new ArgumentException("El email es obligatorio", nameof(email));    }        var user = new User(name, email);

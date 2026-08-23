@@ -92,8 +92,12 @@ app.layout = dbc.Container(
             className="mb-3",
         ),
 
-        # Hidden store for the last successful JSON result
+        # Hidden stores
         dcc.Store(id="result-store"),
+        dcc.Store(id="pr-url-store"),
+
+        # PR banner — hidden until a PR is created
+        html.Div(id="pr-banner"),
 
         dbc.Spinner(
             html.Div(id="report-output"),
@@ -183,6 +187,7 @@ app.layout = dbc.Container(
     Output("report-output",   "children"),
     Output("result-store",    "data"),
     Output("patcher-section", "style"),
+    Output("pr-url-store",    "data"),
     Input("btn-analyze", "n_clicks"),
     State("file-dropdown", "value"),
     State("file-custom",   "value"),
@@ -199,10 +204,12 @@ def run_analysis(_n_clicks, dropdown_val, custom_val, github_val):
             dbc.Alert("Please select or enter a file path before analyzing.", color="warning"),
             None,
             {"display": "none"},
+            None,
         )
 
     final_state = GraphAgent.run(file_path)
-    result = final_state.get("report", {})
+    result  = final_state.get("report", {})
+    pr_url  = final_state.get("pr_url", "")
 
     if not result:
         error = final_state.get("error", "unknown error")
@@ -214,12 +221,32 @@ def run_analysis(_n_clicks, dropdown_val, custom_val, github_val):
             ),
             None,
             {"display": "none"},
+            None,
         )
 
     has_diffs = any(f.get("diff", "").strip() for f in result.get("findings", []))
     patcher_style = {"display": "block"} if has_diffs else {"display": "none"}
 
-    return _render_report(result), result, patcher_style
+    return _render_report(result), result, patcher_style, pr_url or None
+
+
+@app.callback(
+    Output("pr-banner", "children"),
+    Input("pr-url-store", "data"),
+    prevent_initial_call=True,
+)
+def show_pr_banner(pr_url: str | None):
+    if not pr_url or not pr_url.startswith("https://github.com"):
+        return None
+    return dbc.Alert(
+        [
+            html.Strong("🐙 Pull Request created: "),
+            html.A(pr_url, href=pr_url, target="_blank", rel="noopener noreferrer"),
+        ],
+        color="success",
+        className="mt-2 mb-3",
+        dismissable=True,
+    )
 
 
 @app.callback(

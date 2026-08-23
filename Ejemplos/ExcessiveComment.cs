@@ -31,4 +31,6 @@ public class InvoiceCalculator
         // Check if total exceeds threshold.
         return total > DiscountThreshold;
     }
-}    private const decimal DiscountThreshold = 1000m;
+}
+    private const decimal DiscountThreshold = 1000m;
+

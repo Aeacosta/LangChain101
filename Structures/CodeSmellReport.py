@@ -69,6 +69,7 @@ class GraphState(TypedDict):
     patched         : True once the corrected file has been written to disk.
     valid_json      : True when report_json parses successfully.
     error           : last error message, if any node failed.
+    pr_url          : HTML URL of the GitHub PR created after analysis, or "".
     """
     file_path:     str
     raw_response:  str
@@ -78,3 +79,4 @@ class GraphState(TypedDict):
     patched:       bool
     valid_json:    bool
     error:         str
+    pr_url:        str

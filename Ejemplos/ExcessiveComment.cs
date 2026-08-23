@@ -29,6 +29,6 @@ public class InvoiceCalculator
     public bool HasDiscount(decimal total)
     {
         // Check if total exceeds threshold.
-        return total > 1000;
+        return total > DiscountThreshold;
     }
-}
+}    private const decimal DiscountThreshold = 1000m;

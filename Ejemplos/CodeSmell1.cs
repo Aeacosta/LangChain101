@@ -12,10 +12,10 @@ public class UserManager
             throw new ArgumentException("Invalid email.");
 
         // Save user (simulated)
-        Console.WriteLine($"Saving user '{name}' to the database...");
+        _logger.Log(string.Format(Messages.SaveUser, user.Name));
 
         // Send welcome email
-        Console.WriteLine($"Sending welcome email to {email}...");
+        _logger.Log(string.Format(Messages.SendWelcomeEmail, user.Email));
     }
 }
 

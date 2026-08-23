@@ -7,6 +7,7 @@ from XTPAnalyser.Agents.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
 from XTPAnalyser.Agents.XTPMismatchJustificationAgent import XTPMismatchJustificationAgent
 from XTPAnalyser.Agents.XTPTableExtractor import XTPTableExtractor
 from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
+from XTPAnalyser.Agents.XTPGitCommitAgent import XTPGitCommitAgent
 
 __all__ = [
     "XTPExpertAgent",
@@ -17,4 +18,5 @@ __all__ = [
     "XTPMismatchJustificationAgent",
     "XTPTableExtractor",
     "XTPFileComparer",
+    "XTPGitCommitAgent",
 ]

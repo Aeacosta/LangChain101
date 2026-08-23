@@ -51,6 +51,7 @@ class XTPState(TypedDict, total=False):
 
     Fields
     ------
+    input_program   : Full text of the XTP program supplied by the caller (Program A).
     output_folder   : Target directory for generated files (set by caller).
     generator_output: Raw text returned by XTPGeneratorAgent (set by *generate* node).
     delivery_result : Confirmation text returned by XTPDeliveryAgent (set by *deliver* node).
@@ -58,6 +59,7 @@ class XTPState(TypedDict, total=False):
     log             : AgentLogger instance shared across all nodes.
     """
 
+    input_program: str
     output_folder: str
     generator_output: str
     delivery_result: str
@@ -70,16 +72,20 @@ class XTPState(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 def _generate_node(state: XTPState) -> XTPState:
-    """Call XTPGeneratorAgent and store the raw output in state."""
+    """Call XTPGeneratorAgent to produce Program B + Bin2Bin from the input program."""
     from XTPAnalyser.Agents.XTPGeneratorAgent import XTPGeneratorAgent  # lazy import
 
     log: AgentLogger = state["log"]
     log._logger.info("▶ Initialising XTPGeneratorAgent …")
 
+    input_program = state.get("input_program", "")
+    if not input_program:
+        return {**state, "error": "No input XTP program provided."}
+
     try:
         agent = XTPGeneratorAgent()
         log._logger.info("▶ Running generator (this may take ~30–60 s) …")
-        generator_output = agent.invoke("Generate 2 Random XTP Programs and Bin2Bin Matrix File correlating the 2 Programs")
+        generator_output = agent.invoke(input_program)
         log._logger.info("✓ Generator finished.")
         return {**state, "generator_output": generator_output}
     except Exception as exc:  # noqa: BLE001
@@ -104,6 +110,7 @@ def _deliver_node(state: XTPState) -> XTPState:
         log._logger.info("▶ Saving files to %s/ …", output_folder)
         delivery_result = agent.invoke(
             generator_output=state["generator_output"],
+            input_program=state.get("input_program", ""),
             output_folder=output_folder,
         )
         log._logger.info("✓ Files saved.")

@@ -1,8 +1,9 @@
 """
-XTPDeliveryAgent — Parses combined generator output and saves files to disk.
+XTPDeliveryAgent — Parses generator output and saves files to disk.
 
-Extracts Program A (XTP), Program B (XTP), and the Bin2Bin CSV matrix from
-the upstream generator response and writes each as a standalone file.
+Extracts Program B (XTP) and the Bin2Bin CSV matrix from the upstream
+generator response and writes each as a standalone file alongside the
+original Program A (passed in separately).
 """
 
 import os
@@ -122,53 +123,64 @@ class XTPDeliveryAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_blocks(text: str) -> tuple[str, str, str]:
-        """Extract Program A, Program B, and the Bin2Bin CSV from *text*.
+    def _extract_blocks(text: str) -> tuple[str, str]:
+        """Extract Program B and the Bin2Bin CSV from *text*.
 
-        The generator emits three fenced code blocks in order:
-          1. ```xtp  … ```   — Program A
-          2. ```xtp  … ```   — Program B
-          3. ```csv  … ```   — Bin2Bin matrix
+        The generator emits two fenced code blocks in order:
+          1. ```xtp  … ```   — Program B (modified)
+          2. ```csv  … ```   — Bin2Bin matrix
 
-        Returns (prog_a, prog_b, csv_content).  Raises ValueError if any
+        Returns (prog_b, csv_content).  Raises ValueError if any
         block cannot be found.
         """
         xtp_blocks = re.findall(r"```xtp\s*\n(.*?)```", text, re.DOTALL)
         csv_blocks = re.findall(r"```csv\s*\n(.*?)```", text, re.DOTALL)
 
-        if len(xtp_blocks) < 2:
-            raise ValueError(
-                f"Expected 2 ```xtp blocks in generator output, found {len(xtp_blocks)}."
-            )
+        if not xtp_blocks:
+            raise ValueError("No ```xtp block found in generator output.")
         if not csv_blocks:
             raise ValueError("No ```csv block found in generator output.")
 
-        return xtp_blocks[0].strip(), xtp_blocks[1].strip(), csv_blocks[0].strip()
+        return xtp_blocks[0].strip(), csv_blocks[0].strip()
 
     # ------------------------------------------------------------------
     # Invocation
     # ------------------------------------------------------------------
 
-    def invoke(self, generator_output: str, output_folder: str = "Programas") -> str:
+    def invoke(
+        self,
+        generator_output: str,
+        input_program: str,
+        output_folder: str = "Programas",
+    ) -> str:
         """Parse *generator_output*, extract assets in Python, then instruct
-        the agent to save all three files to *output_folder*."""
+        the agent to save all three files to *output_folder*.
 
+        Parameters
+        ----------
+        generator_output:
+            Raw text returned by XTPGeneratorAgent (contains Program B + CSV blocks).
+        input_program:
+            The original XTP program text (saved as Program A).
+        output_folder:
+            Target directory for the written files.
+        """
         self._log._logger.info("[XTPDeliveryAgent] Saving assets to: %s", output_folder)
 
         try:
-            prog_a, prog_b, csv_content = self._extract_blocks(generator_output)
+            prog_b, csv_content = self._extract_blocks(generator_output)
         except ValueError as exc:
             self._log._logger.error("[XTPDeliveryAgent] Extraction failed: %s", exc)
             return f"ERROR: {exc}"
 
         self._log._logger.debug(
-            "[XTPDeliveryAgent] Extracted blocks — A: %d chars, B: %d chars, CSV: %d chars",
-            len(prog_a), len(prog_b), len(csv_content),
+            "[XTPDeliveryAgent] Extracted blocks — B: %d chars, CSV: %d chars",
+            len(prog_b), len(csv_content),
         )
 
         message = (
             f"Save these three assets to the `{output_folder}` folder.\n\n"
-            f"PROGRAM_A:\n{prog_a}\n\n"
+            f"PROGRAM_A:\n{input_program}\n\n"
             f"PROGRAM_B:\n{prog_b}\n\n"
             f"BIN2BIN_CSV:\n{csv_content}"
         )

@@ -1,10 +1,10 @@
 """
-XTPGeneratorAgent — Synthetic XTP program & Bin2Bin matrix generator.
+XTPGeneratorAgent — XTP program modifier & Bin2Bin matrix generator.
 
-Generates two valid XTP test program scripts (Program A / Program B) with a
-controlled parametric delta. The Bin2Bin yield-transition matrix is computed
-deterministically in Python and written directly to disk as a CSV — the LLM
-is never asked to produce or narrate it.
+Receives an existing XTP program, applies a controlled parametric delta to
+produce a modified version (Program B), and computes a deterministic
+Bin2Bin yield-transition matrix.  The LLM is never asked to produce or
+narrate the matrix — it is computed in Python and written directly to disk.
 """
 
 import csv
@@ -21,28 +21,33 @@ from Helpers.Logger import AgentLogger
 from RAG.xtp_rag import XTPRagCore
 
 _SYSTEM_PROMPT = """
-    You are an expert ATE Test Program Generator specializing in synthetic XTP (eXtensible Test Script Language) code generation.
+    You are an expert ATE Test Program engineer specialising in XTP (eXtensible Test Script Language).
 
 ### CORE OBJECTIVE
-Generate two valid XTP test program scripts (`Program A` and `Program B`) featuring intentional, controlled parametric differences.
+You receive an existing XTP test program (the *Input Program*).
+Your task is to produce:
+  1. **Program B** — a syntactically valid XTP script that is the *Input Program* with ONE
+     controlled parametric modification applied (the delta provided by `select_random_xtp_delta`).
+  2. **Bin2Bin CSV** — computed by the `generate_bin2bin_csv` tool (never written by hand).
 
 ### WORKFLOW RULES
 
 1. TOOL EXECUTION FIRST:
    - Call `select_random_xtp_delta()` to select the specific block modification (`LEVELS`, `TIMING`, or `PARAMETRICS`).
-   - Call `generate_bin2bin_csv()` to compute the Bin2Bin matrix. The tool returns the CSV content under the `CSV_CONTENT:` marker — you MUST include it verbatim in your output (step 3).
-   - Call `find_xtp_documents` to retrieve relevant XTP syntax examples before writing the programs.
+   - Call `generate_bin2bin_csv()` to compute the Bin2Bin matrix. The tool returns the CSV content
+     under the `CSV_CONTENT:` marker — you MUST include it verbatim in your output (step 3).
+   - Call `find_xtp_documents` to retrieve relevant XTP syntax guidance if needed.
 
-2. PROGRAM GENERATION:
-   - Construct complete, syntactically valid XTP scripts for **Program A** (Baseline) and **Program B** (Modified).
-   - Ensure both programs contain all 6 mandatory XTP structural blocks: `PINMAP`, `LEVELS`, `TIMING`, `PARAMETRICS`, `FUNCTIONS`, `BINNING`.
-   - Embed the target parameter delta explicitly inside Program B's modified block.
+2. PROGRAM MODIFICATION:
+   - Copy the *Input Program* exactly as-is, but apply the single parametric change indicated by
+     `select_random_xtp_delta` inside the relevant block.
+   - The result is **Program B** (the modified version). Do NOT rename or restructure anything else.
 
-3. OUTPUT FORMAT — output all three blocks in this exact order, nothing else:
-   - Program A in a fenced code block labelled ` ```xtp `.
+3. OUTPUT FORMAT — output exactly two blocks in this order, nothing else:
    - Program B in a fenced code block labelled ` ```xtp `.
-   - The Bin2Bin CSV content (everything after `CSV_CONTENT:` in the tool result) in a fenced code block labelled ` ```csv `.
-   - Do NOT add any explanation, commentary, summary, or extra text outside these three blocks.
+   - The Bin2Bin CSV content (everything after `CSV_CONTENT:` in the tool result) in a fenced
+     code block labelled ` ```csv `.
+   - Do NOT add any explanation, commentary, summary, or extra text outside these two blocks.
 
 ### XTP SYNTAX REFERENCE
 ```xtp
@@ -75,8 +80,8 @@ BINNING {
 
 
 class XTPGeneratorAgent:
-    """Generates paired XTP test programs (A/B) with a controlled parametric
-    delta and a matching Bin2Bin yield-transition matrix."""
+    """Receives an XTP program, applies a controlled parametric delta to produce
+    Program B (modified version) and a matching Bin2Bin yield-transition matrix."""
 
     def __init__(self, logger: AgentLogger | None = None):
         self._log = logger or AgentLogger(name="xtp_generator_agent", level="DEBUG")
@@ -105,34 +110,32 @@ class XTPGeneratorAgent:
             """
             Computes a mathematically consistent Bin2Bin yield transition matrix
             and writes it directly to disk as Bin2Bin_Matrix.csv.
-            Returns the file path on success. Do NOT reproduce or narrate the
-            matrix contents in your response.
+            Returns the file path and the CSV content under CSV_CONTENT:.
 
             Parameters:
             - total_dice: Total number of DUTs tested (default 1000).
             - delta_severity: 'mild', 'moderate', or 'severe' shift in test limits.
             - output_folder: Directory to write the CSV (default 'Programas').
             """
-            pass_prime_a = int(total_dice * 0.80)
-            pass_eco_a   = int(total_dice * 0.10)
+            pass_prime_a   = int(total_dice * 0.80)
+            pass_eco_a     = int(total_dice * 0.10)
             leakage_fail_a = int(total_dice * 0.05)
             timing_fail_a  = int(total_dice * 0.05)
 
             if delta_severity == "mild":
-                downbin_rate      = random.uniform(0.02, 0.05)
-                timing_fail_rate  = random.uniform(0.01, 0.03)
+                downbin_rate     = random.uniform(0.02, 0.05)
+                timing_fail_rate = random.uniform(0.01, 0.03)
             elif delta_severity == "moderate":
-                downbin_rate      = random.uniform(0.10, 0.18)
-                timing_fail_rate  = random.uniform(0.05, 0.08)
+                downbin_rate     = random.uniform(0.10, 0.18)
+                timing_fail_rate = random.uniform(0.05, 0.08)
             else:  # severe
-                downbin_rate      = random.uniform(0.25, 0.35)
-                timing_fail_rate  = random.uniform(0.12, 0.20)
+                downbin_rate     = random.uniform(0.25, 0.35)
+                timing_fail_rate = random.uniform(0.12, 0.20)
 
             to_eco         = int(pass_prime_a * downbin_rate)
             to_timing_fail = int(pass_prime_a * timing_fail_rate)
             stay_prime     = pass_prime_a - to_eco - to_timing_fail
 
-            bins = ["SB_1001_PassPrime", "SB_1003_EcoPass", "SB_3001_IDDQ_Fail", "SB_4001_TimingFail"]
             rows = [
                 ["Prog_A \\ Prog_B", "SB_1001_PassPrime", "SB_1003_EcoPass", "SB_3001_IDDQ_Fail", "SB_4001_TimingFail"],
                 ["SB_1001_PassPrime", stay_prime,   to_eco,       0,              to_timing_fail],
@@ -156,9 +159,9 @@ class XTPGeneratorAgent:
         @tool
         def select_random_xtp_delta() -> str:
             """
-            Selects a random electrical test change scenario to apply between
-            Program A and Program B. Returns the block to modify, the parameter
-            name, and the two values (A and B).
+            Selects a random electrical test change scenario to apply to the
+            Input Program. Returns the block to modify, the parameter name,
+            and the two values (original A and modified B).
             """
             scenarios = [
                 {
@@ -196,8 +199,19 @@ class XTPGeneratorAgent:
             debug=False,
         )
 
-    def invoke(self, message: str = "Generate 2 Random XTP Programs") -> str:
-        """Run the generator agent and return the full formatted response."""
-        self._log._logger.info("[XTPGeneratorAgent] Question: %s", message)
+    def invoke(self, xtp_program: str) -> str:
+        """Run the generator agent on *xtp_program* and return the formatted response.
+
+        Parameters
+        ----------
+        xtp_program:
+            The full text of the input XTP program to be modified.
+        """
+        self._log._logger.info("[XTPGeneratorAgent] Modifying input XTP program (%d chars)", len(xtp_program))
+        message = (
+            "Here is the Input Program to modify:\n\n"
+            f"```xtp\n{xtp_program}\n```\n\n"
+            "Apply a random parametric delta and produce Program B + Bin2Bin CSV."
+        )
         result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
         return result["messages"][-1].content

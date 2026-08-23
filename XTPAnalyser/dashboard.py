@@ -1,16 +1,17 @@
 """
 XTP Analyser — Dash Dashboard
 ==============================
-Two-tab Dash application:
+Three-tab Dash application:
 
-  • Generate  — AI pipeline (XTPGeneratorAgent → XTPDeliveryAgent) that
-                produces a fresh Program A / B pair and Bin2Bin matrix.
-  • Analyse   — Analysis pipeline (XTPAnalysisGraph) that diffs two uploaded
-                XTP programs against a Bin2Bin CSV and returns a mismatch
-                justification table.
-
-Both tabs share the same upload dropzones for Program A, Program B and
-Bin2Bin CSV (whose contents are displayed in a three-panel viewer below).
+  • Generate    — AI pipeline (XTPGeneratorAgent → XTPDeliveryAgent) that
+                  receives an uploaded XTP program (Program A), produces a
+                  modified version (Program B) and a Bin2Bin matrix.
+  • Analyse     — Analysis pipeline (XTPAnalysisGraph) that diffs two uploaded
+                  XTP programs against a Bin2Bin CSV and returns a mismatch
+                  justification table.
+  • Git Bin2Bin — Enter two commit SHAs from the XTPProgram GitHub repo;
+                  the pipeline fetches both program versions, diffs them,
+                  produces a Bin2Bin matrix, and runs the Bin2Bin analysis.
 
 Usage
 -----
@@ -50,12 +51,20 @@ _BIN2BIN = OUTPUT_FOLDER / "Bin2Bin_Matrix.csv"
 # ---------------------------------------------------------------------------
 
 _gen_lock  = threading.Lock()
-_gen_state: dict  = {"running": False, "log": [], "done": False, "error": None}
+_gen_state: dict  = {"running": False, "log": [], "done": False, "error": None,
+                     "input_program": None}
 
 _anl_lock  = threading.Lock()
 _anl_state: dict  = {
     "running": False, "log": [], "done": False, "error": None,
     "mismatch_json": None, "justification_text": None,
+}
+
+_git_lock  = threading.Lock()
+_git_state: dict  = {
+    "running": False, "log": [], "done": False, "error": None,
+    "sha_a": "", "sha_b": "", "bin2bin_report": None,
+    "program_a": None, "program_b": None, "diff": None,
 }
 
 # ---------------------------------------------------------------------------
@@ -89,6 +98,11 @@ def _log_gen(msg: str) -> None:
 def _log_anl(msg: str) -> None:
     with _anl_lock:
         _anl_state["log"].append(msg)
+
+
+def _log_git(msg: str) -> None:
+    with _git_lock:
+        _git_state["log"].append(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +291,16 @@ def _file_viewer() -> html.Div:
             html.Div([
                 html.Span("Bin2Bin Matrix", className="panel-title"),
                 html.Span("—", id="badge-bin", className="badge"),
+                dbc.Button(
+                    "↓ Export CSV",
+                    id="btn-export-bin2bin",
+                    size="sm",
+                    outline=True,
+                    color="secondary",
+                    className="ms-auto export-btn",
+                    disabled=True,
+                ),
+                dcc.Download(id="download-bin2bin"),
             ], className="panel-header"),
             html.Div(id="body-bin", className="panel-body"),
         ], className="bottom-row panel"),
@@ -292,16 +316,18 @@ _tab_generate = dbc.Tab(
     tab_id="tab-generate",
     children=html.Div([
         html.Div([
-            dbc.Button("✦ Generate New Pair", id="btn-generate", color="primary",
-                       className="btn-action"),
+            dbc.Button("✦ Generate Modified Program", id="btn-generate", color="primary",
+                       className="btn-action", disabled=True),
             html.Div(className="sep"),
-            _dropzone("a",   "Program A", ".xtp,.txt", "gen"),
-            _dropzone("b",   "Program B", ".xtp,.txt", "gen"),
-            _dropzone("bin", "Bin2Bin",   ".csv,.txt", "gen"),
+            # Only the input program (Program A) is uploaded by the user.
+            # Program B and Bin2Bin are produced by the pipeline and shown read-only.
+            _dropzone("a", "Input Program (A)", ".xtp,.txt", "gen"),
+            html.Span("→ Program B + Bin2Bin will appear after generation",
+                      style={"fontSize": ".72rem", "color": "#475569", "alignSelf": "center"}),
             dbc.Button("↺ Refresh", id="btn-refresh-gen", outline=True,
                        color="secondary", className="ms-auto"),
         ], className="toolbar"),
-        _log_modal("gen-modal", "⚙ Generating XTP pair + Bin2Bin…"),
+        _log_modal("gen-modal", "⚙ Modifying XTP Program + Bin2Bin…"),
         dcc.Interval(id="gen-interval", interval=800, disabled=True, n_intervals=0),
     ]),
 )
@@ -330,6 +356,55 @@ _tab_analyse = dbc.Tab(
 )
 
 # ---------------------------------------------------------------------------
+# Tab: Git Bin2Bin
+# ---------------------------------------------------------------------------
+
+_tab_git = dbc.Tab(
+    label="⎇ Git Bin2Bin",
+    tab_id="tab-git",
+    children=html.Div([
+        html.Div([
+            # SHA inputs
+            html.Div([
+                dbc.Label("Commit SHA A", html_for="git-sha-a",
+                          className="git-label"),
+                dbc.Input(
+                    id="git-sha-a",
+                    placeholder="e.g. a1b2c3d…",
+                    type="text",
+                    className="git-sha-input",
+                    debounce=True,
+                ),
+            ], className="git-sha-group"),
+            html.Span("→", className="git-arrow"),
+            html.Div([
+                dbc.Label("Commit SHA B", html_for="git-sha-b",
+                          className="git-label"),
+                dbc.Input(
+                    id="git-sha-b",
+                    placeholder="e.g. e4f5g6h…",
+                    type="text",
+                    className="git-sha-input",
+                    debounce=True,
+                ),
+            ], className="git-sha-group"),
+            html.Div(className="sep"),
+            dbc.Button(
+                "⎇ Run Git Bin2Bin",
+                id="btn-git",
+                color="warning",
+                className="btn-action",
+                disabled=True,
+            ),
+            dbc.Button("↺ Refresh", id="btn-refresh-git", outline=True,
+                       color="secondary", className="ms-auto"),
+        ], className="toolbar"),
+        _log_modal("git-modal", "⎇ Fetching commits & computing Bin2Bin…"),
+        dcc.Interval(id="git-interval", interval=800, disabled=True, n_intervals=0),
+    ]),
+)
+
+# ---------------------------------------------------------------------------
 # App layout  — single shared viewer lives here, outside the tabs
 # ---------------------------------------------------------------------------
 
@@ -349,17 +424,20 @@ app.layout = html.Div([
 
     # ── Tabs (toolbars + modals only — no viewer here) ──
     dbc.Tabs(
-        [_tab_generate, _tab_analyse],
+        [_tab_generate, _tab_analyse, _tab_git],
         id="main-tabs",
         active_tab="tab-generate",
         className="main-tabs",
     ),
 
-    # ── Single file viewer shared by both tabs ──
+    # ── Single file viewer shared by all tabs ──
     _file_viewer(),
 
     # ── Analysis results (hidden until pipeline completes) ──
     html.Div(id="anl-results", className="results-panel"),
+
+    # ── Git Bin2Bin results ──
+    html.Div(id="git-results", className="results-panel"),
 
     # ── Shared data stores (survive tab switches) ──
     dcc.Store(id="store-a"),
@@ -465,9 +543,11 @@ body { font-family: -apple-system,"Segoe UI",system-ui,sans-serif;
 /* Bottom matrix row */
 .bottom-row { height:220px; border-top:2px solid #2d3748; flex-shrink:0; }
 .panel { display:flex; flex-direction:column; overflow:hidden; }
-.panel-header { display:flex; align-items:center; justify-content:space-between;
+.panel-header { display:flex; align-items:center; gap:8px;
   padding:8px 16px; background:#161b27; border-bottom:1px solid #2d3748;
   flex-shrink:0; }
+.export-btn { font-size:.70rem !important; padding:2px 10px !important;
+  border-radius:5px !important; line-height:1.4 !important; }
 .panel-title { font-size:.78rem; font-weight:700; letter-spacing:.08em; color:#7c3aed; }
 .badge { font-size:.67rem; font-weight:500; color:#64748b; background:#1e293b;
   padding:2px 8px; border-radius:20px; }
@@ -506,6 +586,28 @@ body { font-family: -apple-system,"Segoe UI",system-ui,sans-serif;
 .results-panel h4 { color:#a78bfa; font-size:.88rem; margin-bottom:12px; }
 .results-warning { color:#f59e0b; font-size:.82rem; white-space:pre-wrap;
   font-family:"Cascadia Code","Consolas",monospace; }
+
+/* Git Bin2Bin tab — SHA input controls */
+.git-sha-group { display:flex; flex-direction:column; gap:3px; }
+.git-label { font-size:.70rem; font-weight:600; color:#64748b;
+  text-transform:uppercase; letter-spacing:.06em; margin:0; }
+.git-sha-input { background:#0c0f1a !important; border:1px solid #334155 !important;
+  color:#cbd5e1 !important; font-family:"Cascadia Code","Consolas",monospace;
+  font-size:.80rem; border-radius:6px; padding:5px 10px; min-width:200px; }
+.git-sha-input:focus { border-color:#7c3aed !important;
+  box-shadow:0 0 0 2px rgba(124,58,237,.25) !important; }
+.git-arrow { font-size:1.1rem; color:#475569; align-self:center;
+  padding:0 4px; margin-top:16px; }
+
+/* Git Bin2Bin report section */
+.git-report { font-family:"Cascadia Code","Consolas",monospace; font-size:.76rem;
+  color:#cbd5e1; white-space:pre-wrap; line-height:1.6; }
+
+/* Git diff block inside results panel */
+.git-diff-block { max-height:340px; overflow:auto; margin-bottom:16px; }
+
+/* Widen the results panel when it contains a diff */
+.results-panel { max-height:60vh !important; }
 </style>
 </head>
 <body>
@@ -566,7 +668,8 @@ def toggle_view(n_raw, n_diff):
 # Callbacks — Generate tab
 # ===========================================================================
 
-# ── Upload dropzones (Generate tab) ────────────────────────────────────────
+# ── Upload dropzone — Input Program A (Generate tab) ───────────────────────
+# Uploading Program A enables the Generate button.
 
 @callback(
     Output("store-a",          "data",     allow_duplicate=True),
@@ -574,58 +677,18 @@ def toggle_view(n_raw, n_diff):
     Output("badge-a",          "children", allow_duplicate=True),
     Output("gen-dz-label-a",   "children"),
     Output("gen-dz-a",         "className"),
-    Output("body-diff",        "children", allow_duplicate=True),
+    Output("btn-generate",     "disabled", allow_duplicate=True),
     Input("gen-dz-a",          "contents"),
     State("gen-dz-a",          "filename"),
-    State("store-b",           "data"),
     prevent_initial_call=True,
 )
-def gen_upload_a(contents, filename, text_b):
+def gen_upload_a(contents, filename):
     if not contents:
         return (dash.no_update,) * 6
     text, fname = _save_upload("a", contents, filename)
-    lbl, cls = _dz_update("Program A", ".xtp,.txt", text, fname)
-    other = text_b or _read_slot("b")[0]
-    return text, _xtp_viewer(text), fname, lbl, cls, _diff_viewer(text, other)
-
-
-@callback(
-    Output("store-b",          "data",     allow_duplicate=True),
-    Output("body-b",           "children", allow_duplicate=True),
-    Output("badge-b",          "children", allow_duplicate=True),
-    Output("gen-dz-label-b",   "children"),
-    Output("gen-dz-b",         "className"),
-    Output("body-diff",        "children", allow_duplicate=True),
-    Input("gen-dz-b",          "contents"),
-    State("gen-dz-b",          "filename"),
-    State("store-a",           "data"),
-    prevent_initial_call=True,
-)
-def gen_upload_b(contents, filename, text_a):
-    if not contents:
-        return (dash.no_update,) * 6
-    text, fname = _save_upload("b", contents, filename)
-    lbl, cls = _dz_update("Program B", ".xtp,.txt", text, fname)
-    other = text_a or _read_slot("a")[0]
-    return text, _xtp_viewer(text), fname, lbl, cls, _diff_viewer(other, text)
-
-
-@callback(
-    Output("store-bin",        "data",     allow_duplicate=True),
-    Output("body-bin",         "children", allow_duplicate=True),
-    Output("badge-bin",        "children", allow_duplicate=True),
-    Output("gen-dz-label-bin", "children"),
-    Output("gen-dz-bin",       "className"),
-    Input("gen-dz-bin",        "contents"),
-    State("gen-dz-bin",        "filename"),
-    prevent_initial_call=True,
-)
-def gen_upload_bin(contents, filename):
-    if not contents:
-        return (dash.no_update,) * 5
-    text, fname = _save_upload("bin", contents, filename)
-    lbl, cls = _dz_update("Bin2Bin", ".csv,.txt", text, fname)
-    return text, _csv_viewer(text), fname, lbl, cls
+    lbl, cls = _dz_update("Input Program (A)", ".xtp,.txt", text, fname)
+    # Enable the Generate button now that we have an input program
+    return text, _xtp_viewer(text), fname, lbl, cls, False
 
 
 # ── Refresh (Generate tab) ─────────────────────────────────────────────────
@@ -641,11 +704,7 @@ def gen_upload_bin(contents, filename):
     Output("store-b",          "data",     allow_duplicate=True),
     Output("store-bin",        "data",     allow_duplicate=True),
     Output("gen-dz-label-a",   "children", allow_duplicate=True),
-    Output("gen-dz-label-b",   "children", allow_duplicate=True),
-    Output("gen-dz-label-bin", "children", allow_duplicate=True),
     Output("gen-dz-a",         "className", allow_duplicate=True),
-    Output("gen-dz-b",         "className", allow_duplicate=True),
-    Output("gen-dz-bin",       "className", allow_duplicate=True),
     Output("body-diff",        "children", allow_duplicate=True),
     Input("btn-refresh-gen",   "n_clicks"),
     prevent_initial_call=True,
@@ -654,15 +713,12 @@ def gen_refresh(_):
     a_txt,   a_fn   = _read_slot("a")
     b_txt,   b_fn   = _read_slot("b")
     bin_txt, bin_fn = _read_slot("bin")
-    lbl_a,   cls_a   = _dz_update("Program A", ".xtp,.txt", a_txt,   a_fn)
-    lbl_b,   cls_b   = _dz_update("Program B", ".xtp,.txt", b_txt,   b_fn)
-    lbl_bin, cls_bin = _dz_update("Bin2Bin",   ".csv,.txt", bin_txt, bin_fn)
+    lbl_a, cls_a = _dz_update("Input Program (A)", ".xtp,.txt", a_txt, a_fn)
     return (
         _xtp_viewer(a_txt), _xtp_viewer(b_txt), _csv_viewer(bin_txt),
         a_fn or "—", b_fn or "—", bin_fn or "—",
         a_txt, b_txt, bin_txt,
-        lbl_a, lbl_b, lbl_bin,
-        cls_a, cls_b, cls_bin,
+        lbl_a, cls_a,
         _diff_viewer(a_txt, b_txt),
     )
 
@@ -674,13 +730,20 @@ def gen_refresh(_):
     Output("gen-interval", "disabled", allow_duplicate=True),
     Output("btn-generate", "disabled", allow_duplicate=True),
     Input("btn-generate",  "n_clicks"),
+    State("store-a",       "data"),
     prevent_initial_call=True,
 )
-def gen_start(_n):
+def gen_start(_n, text_a):
+    input_program = text_a or (_read_slot("a")[0])
+    if not input_program:
+        return dash.no_update, dash.no_update, dash.no_update
     with _gen_lock:
         if _gen_state["running"]:
             return dash.no_update, dash.no_update, dash.no_update
-        _gen_state.update({"running": True, "log": [], "done": False, "error": None})
+        _gen_state.update({
+            "running": True, "log": [], "done": False,
+            "error": None, "input_program": input_program,
+        })
     threading.Thread(target=_run_gen_pipeline, daemon=True).start()
     return True, False, True   # open modal, enable interval, disable button
 
@@ -697,11 +760,7 @@ def gen_start(_n):
     Output("badge-b",          "children", allow_duplicate=True),
     Output("badge-bin",        "children", allow_duplicate=True),
     Output("gen-dz-label-a",   "children", allow_duplicate=True),
-    Output("gen-dz-label-b",   "children", allow_duplicate=True),
-    Output("gen-dz-label-bin", "children", allow_duplicate=True),
     Output("gen-dz-a",         "className", allow_duplicate=True),
-    Output("gen-dz-b",         "className", allow_duplicate=True),
-    Output("gen-dz-bin",       "className", allow_duplicate=True),
     Output("body-diff",        "children", allow_duplicate=True),
     Input("gen-interval",      "n_intervals"),
     prevent_initial_call=True,
@@ -720,19 +779,16 @@ def gen_poll(_):
         a_txt,   a_fn   = _read_slot("a")
         b_txt,   b_fn   = _read_slot("b")
         bin_txt, bin_fn = _read_slot("bin")
-        lbl_a,   cls_a   = _dz_update("Program A", ".xtp,.txt", a_txt,   a_fn)
-        lbl_b,   cls_b   = _dz_update("Program B", ".xtp,.txt", b_txt,   b_fn)
-        lbl_bin, cls_bin = _dz_update("Bin2Bin",   ".csv,.txt", bin_txt, bin_fn)
+        lbl_a, cls_a = _dz_update("Input Program (A)", ".xtp,.txt", a_txt, a_fn)
         return (
             log_children, False, True, False,
             _xtp_viewer(a_txt), _xtp_viewer(b_txt), _csv_viewer(bin_txt),
             a_fn or "—", b_fn or "—", bin_fn or "—",
-            lbl_a, lbl_b, lbl_bin,
-            cls_a, cls_b, cls_bin,
+            lbl_a, cls_a,
             _diff_viewer(a_txt, b_txt),
         )
 
-    return log_children, True, False, True, *([dash.no_update] * 13)
+    return log_children, True, False, True, *([dash.no_update] * 9)
 
 
 @callback(
@@ -929,11 +985,18 @@ def _run_gen_pipeline() -> None:
         from Helpers.Logger import AgentLogger
         from XTPAnalyser.graph import XTPState, build_graph
 
+        with _gen_lock:
+            input_program = _gen_state.get("input_program") or ""
+
         log = AgentLogger(name="xtp_gen_dash", level="INFO")
         log.add_ui_sink(_log_gen)
 
         pipeline = build_graph(logger=log)
-        initial: XTPState = {"output_folder": str(OUTPUT_FOLDER), "log": log}
+        initial: XTPState = {
+            "input_program": input_program,
+            "output_folder": str(OUTPUT_FOLDER),
+            "log": log,
+        }
 
         for chunk in pipeline.stream(initial):
             for node_state in chunk.values():
@@ -1045,6 +1108,268 @@ def _build_results(state: dict) -> html.Div:
         children.append(html.Pre(state["justification_text"], className="results-warning"))
 
     return html.Div(children)
+
+
+def _build_git_results(state: dict) -> html.Div:
+    """Render the Git Bin2Bin results panel (diff view + LLM report)."""
+    if state.get("error") and not state.get("bin2bin_report"):
+        return html.Div([
+            html.H4("⚠ Git Pipeline Warning"),
+            html.Pre(state["error"], className="results-warning"),
+        ])
+
+    children: list = []
+
+    # ── Unified diff of the two commit versions ──────────────────────────────
+    prog_a = state.get("program_a") or ""
+    prog_b = state.get("program_b") or ""
+    sha_a  = state.get("sha_a", "A")
+    sha_b  = state.get("sha_b", "B")
+
+    children.append(html.H4(f"⎇ Commit Diff  {sha_a[:8]}  →  {sha_b[:8]}"))
+
+    if prog_a or prog_b:
+        children.append(_diff_viewer(prog_a, prog_b))
+    elif state.get("diff"):
+        # Fallback: render the raw diff string directly as coloured spans
+        spans: list = []
+        for line in state["diff"].splitlines():
+            if line.startswith("+++") or line.startswith("---"):
+                cls = "diff-header"
+            elif line.startswith("@@"):
+                cls = "diff-hunk"
+            elif line.startswith("+"):
+                cls = "diff-add"
+            elif line.startswith("-"):
+                cls = "diff-del"
+            else:
+                cls = "diff-ctx"
+            spans.append(html.Span(line + "\n", className=cls))
+        children.append(html.Pre(spans, className="xtp-code diff-view git-diff-block"))
+    else:
+        children.append(html.P("No diff data available.", className="empty-state"))
+
+    # ── LLM Bin2Bin analysis report ──────────────────────────────────────────
+    report = state.get("bin2bin_report")
+    if report:
+        children.append(html.H4("⎇ Bin2Bin Analysis Report", style={"marginTop": "18px"}))
+        children.append(html.Pre(report, className="git-report"))
+
+    return html.Div(children)
+
+
+# ===========================================================================
+# Callback — Bin2Bin Export
+# ===========================================================================
+
+@callback(
+    Output("btn-export-bin2bin", "disabled"),
+    Input("store-bin", "data"),
+)
+def bin2bin_export_enable(data):
+    """Enable the Export button whenever the store-bin has content."""
+    return not bool(data)
+
+
+@callback(
+    Output("download-bin2bin", "data"),
+    Input("btn-export-bin2bin", "n_clicks"),
+    State("store-bin", "data"),
+    prevent_initial_call=True,
+)
+def bin2bin_export_download(_, data):
+    """Serve the Bin2Bin CSV for download when the Export button is clicked."""
+    if not data:
+        return dash.no_update
+    # Prefer the live file on disk (most authoritative); fall back to store data
+    if _BIN2BIN.exists():
+        content = _BIN2BIN.read_text(encoding="utf-8")
+    else:
+        content = data
+    return dcc.send_string(content, filename="Bin2Bin_Matrix.csv", type="text/csv")
+
+
+# ===========================================================================
+# Callbacks — Git Bin2Bin tab
+# ===========================================================================
+
+# ── Enable Run button when both SHAs are non-empty ─────────────────────────
+
+@callback(
+    Output("btn-git", "disabled"),
+    Input("git-sha-a", "value"),
+    Input("git-sha-b", "value"),
+)
+def git_enable_button(sha_a, sha_b):
+    """Enable the Run button only when both SHA fields have content."""
+    return not (sha_a and sha_a.strip() and sha_b and sha_b.strip())
+
+
+# ── Refresh: reload files from disk after a pipeline run ───────────────────
+
+@callback(
+    Output("body-a",    "children", allow_duplicate=True),
+    Output("body-b",    "children", allow_duplicate=True),
+    Output("body-bin",  "children", allow_duplicate=True),
+    Output("badge-a",   "children", allow_duplicate=True),
+    Output("badge-b",   "children", allow_duplicate=True),
+    Output("badge-bin", "children", allow_duplicate=True),
+    Output("store-a",   "data",     allow_duplicate=True),
+    Output("store-b",   "data",     allow_duplicate=True),
+    Output("store-bin", "data",     allow_duplicate=True),
+    Output("body-diff", "children", allow_duplicate=True),
+    Input("btn-refresh-git", "n_clicks"),
+    prevent_initial_call=True,
+)
+def git_refresh(_):
+    a_txt,   a_fn   = _read_slot("a")
+    b_txt,   b_fn   = _read_slot("b")
+    bin_txt, bin_fn = _read_slot("bin")
+    return (
+        _xtp_viewer(a_txt), _xtp_viewer(b_txt), _csv_viewer(bin_txt),
+        a_fn or "—", b_fn or "—", bin_fn or "—",
+        a_txt, b_txt, bin_txt,
+        _diff_viewer(a_txt, b_txt),
+    )
+
+
+# ── Run button → open modal + start background thread ──────────────────────
+
+@callback(
+    Output("git-modal",    "is_open",  allow_duplicate=True),
+    Output("git-interval", "disabled", allow_duplicate=True),
+    Output("btn-git",      "disabled", allow_duplicate=True),
+    Input("btn-git",       "n_clicks"),
+    State("git-sha-a",     "value"),
+    State("git-sha-b",     "value"),
+    prevent_initial_call=True,
+)
+def git_start(_n, sha_a, sha_b):
+    if not sha_a or not sha_b:
+        return dash.no_update, dash.no_update, dash.no_update
+    with _git_lock:
+        if _git_state["running"]:
+            return dash.no_update, dash.no_update, dash.no_update
+        _git_state.update({
+            "running": True, "log": [], "done": False,
+            "error": None, "bin2bin_report": None,
+            "sha_a": sha_a.strip(), "sha_b": sha_b.strip(),
+        })
+    threading.Thread(target=_run_git_pipeline, daemon=True).start()
+    return True, False, True
+
+
+# ── Polling — update modal log + populate viewer when done ─────────────────
+
+@callback(
+    Output("git-modal-body",  "children"),
+    Output("git-modal-close", "disabled"),
+    Output("git-interval",    "disabled", allow_duplicate=True),
+    Output("btn-git",         "disabled", allow_duplicate=True),
+    Output("body-a",          "children", allow_duplicate=True),
+    Output("body-b",          "children", allow_duplicate=True),
+    Output("body-bin",        "children", allow_duplicate=True),
+    Output("badge-a",         "children", allow_duplicate=True),
+    Output("badge-b",         "children", allow_duplicate=True),
+    Output("badge-bin",       "children", allow_duplicate=True),
+    Output("body-diff",       "children", allow_duplicate=True),
+    Output("git-results",     "children"),
+    Output("store-a",         "data",     allow_duplicate=True),
+    Output("store-b",         "data",     allow_duplicate=True),
+    Output("store-bin",       "data",     allow_duplicate=True),
+    # Auto-switch the shared Raw/Diff toggle to "Diff" when the git pipeline finishes
+    Output("view-raw",        "style",    allow_duplicate=True),
+    Output("view-diff",       "style",    allow_duplicate=True),
+    Output("btn-view-raw",    "className", allow_duplicate=True),
+    Output("btn-view-diff",   "className", allow_duplicate=True),
+    Input("git-interval",     "n_intervals"),
+    State("git-sha-a",        "value"),
+    State("git-sha-b",        "value"),
+    prevent_initial_call=True,
+)
+def git_poll(_, sha_a, sha_b):
+    with _git_lock:
+        state = dict(_git_state)
+
+    log_children = [
+        html.P(line, className=_log_class(line))
+        for line in state["log"]
+    ]
+    done = state["done"] or bool(state["error"])
+
+    if done:
+        a_txt,   a_fn   = _read_slot("a")
+        b_txt,   b_fn   = _read_slot("b")
+        bin_txt, bin_fn = _read_slot("bin")
+        # Re-enable the button only if SHAs are still filled
+        btn_disabled = not (sha_a and sha_a.strip() and sha_b and sha_b.strip())
+        return (
+            log_children, False, True, btn_disabled,
+            _xtp_viewer(a_txt), _xtp_viewer(b_txt), _csv_viewer(bin_txt),
+            a_fn or "—", b_fn or "—", bin_fn or "—",
+            _diff_viewer(a_txt, b_txt),
+            _build_git_results(state),
+            a_txt, b_txt, bin_txt,
+            # Switch shared viewer to Diff mode automatically
+            {"display": "none"},
+            {"display": "flex", "flexDirection": "column", "flex": "1", "minHeight": "0"},
+            "view-toggle",
+            "view-toggle active",
+        )
+
+    return log_children, True, False, True, *([dash.no_update] * 15)
+
+
+@callback(
+    Output("git-modal", "is_open", allow_duplicate=True),
+    Input("git-modal-close", "n_clicks"),
+    prevent_initial_call=True,
+)
+def git_close_modal(_):
+    return False
+
+
+# ===========================================================================
+# Pipeline runner — Git Bin2Bin (background thread)
+# ===========================================================================
+
+def _run_git_pipeline() -> None:
+    try:
+        from Helpers.Logger import AgentLogger
+        from XTPAnalyser.GitCommitGraph import GitCommitState, build_git_commit_graph
+
+        with _git_lock:
+            sha_a = _git_state.get("sha_a", "")
+            sha_b = _git_state.get("sha_b", "")
+
+        log = AgentLogger(name="xtp_git_dash", level="INFO")
+        log.add_ui_sink(_log_git)
+
+        pipeline = build_git_commit_graph(logger=log)
+        initial: GitCommitState = {
+            "sha_a":         sha_a,
+            "sha_b":         sha_b,
+            "output_folder": str(OUTPUT_FOLDER),
+            "log":           log,
+        }
+
+        final = pipeline.invoke(initial)
+
+        with _git_lock:
+            _git_state["bin2bin_report"] = final.get("bin2bin_report")
+            _git_state["program_a"]      = final.get("program_a")
+            _git_state["program_b"]      = final.get("program_b")
+            _git_state["diff"]           = final.get("diff")
+            _git_state["error"]          = final.get("error")
+            _git_state["done"]           = True
+            _git_state["running"]        = False
+
+    except Exception as exc:  # noqa: BLE001
+        _log_git(f"✗ Git pipeline error: {exc}")
+        with _git_lock:
+            _git_state["error"]   = str(exc)
+            _git_state["done"]    = True
+            _git_state["running"] = False
 
 
 # ===========================================================================

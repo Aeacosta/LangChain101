@@ -1,11 +1,14 @@
 """
 XTP Analyser — Main entry point.
 
-Runs the full generate → deliver pipeline via the LangGraph graph,
-then streams each node's state updates to stdout.
+Runs the full analysis pipeline via the LangGraph graph,
+streaming each node's state updates to stdout.
 
 Usage:
     python -m XTPAnalyser.Main
+
+Set SHA_A and SHA_B to the two commit SHAs from the XTPProgram GitHub repo.
+The diff is extracted directly from those commits — no local XTP files needed.
 """
 
 import os
@@ -13,11 +16,7 @@ import os
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from XTPAnalyser.Agents.XTPProgramDiffAgent import XTPProgramDiffAgent
-from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
-from XTPAnalyser.Agents.XTPBin2BinMatrixAgent import XTPBin2BinMatrixAgent
-from XTPAnalyser.Agents.XTPMismatchJustificationAgent import XTPMismatchJustificationAgent
-from XTPAnalyser.Agents.XTPTableExtractor import XTPTableExtractor
+from XTPAnalyser.AnalysisGraph import XTPAnalysisState, build_analysis_graph
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -27,40 +26,55 @@ load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
 
 log = AgentLogger(name="xtp_main", level="DEBUG")
 
-compare_files = XTPFileComparer(r"Programas/Program_A_20260816_002045.xtp", r"Programas/Program_B_20260816_002045.xtp")
+# ---------------------------------------------------------------------------
+# Configure the two commits to compare and the Bin2Bin CSV to analyse against
+# ---------------------------------------------------------------------------
 
-program_diff_agent = XTPProgramDiffAgent(logger=log)
-diff_answer = program_diff_agent.analyse(compare_files)
+SHA_A      = os.getenv("XTP_SHA_A", "")   # e.g. "a1b2c3d..."
+SHA_B      = os.getenv("XTP_SHA_B", "")   # e.g. "e4f5g6h..."
+BIN2BIN    = os.getenv("XTP_BIN2BIN_CSV", r"Programas/Bin2Bin_20260816_002045.csv")
+
+if not SHA_A or not SHA_B:
+    raise SystemExit(
+        "XTP_SHA_A and XTP_SHA_B must be set (env vars or .env file).\n"
+        "Example:\n"
+        "  XTP_SHA_A=abc1234 XTP_SHA_B=def5678 python -m XTPAnalyser.Main"
+    )
+
+# ---------------------------------------------------------------------------
+# Run the pipeline
+# ---------------------------------------------------------------------------
+
+pipeline = build_analysis_graph(logger=log)
+
+initial: XTPAnalysisState = {
+    "sha_a":        SHA_A,
+    "sha_b":        SHA_B,
+    "bin2bin_file": BIN2BIN,
+    "log":          log,
+}
+
+final = pipeline.invoke(initial)
+
+# ---------------------------------------------------------------------------
+# Print results
+# ---------------------------------------------------------------------------
+
 log._logger.info("=== XTP Program Diff Agent ===")
-log._logger.info(diff_answer)
+log._logger.info(final.get("response_xtp_diff", "(no diff report)"))
 
-bin2bin_matrix_agent = XTPBin2BinMatrixAgent(logger=log)
-bin2bin_answer = bin2bin_matrix_agent.analyse(r"Programas/Bin2Bin_20260816_002045.csv")
 log._logger.info("=== XTP Bin2Bin Matrix Agent ===")
-log._logger.info(bin2bin_answer)
+log._logger.info(final.get("response_bin2bin", "(no bin2bin report)"))
 
-# ---------------------------------------------------------------------------
-# Mismatch justification — correlates every off-diagonal transition with the
-# diff changes found above and returns a single justification table.
-# ---------------------------------------------------------------------------
-
-mismatch_agent = XTPMismatchJustificationAgent(logger=log)
-justification_table = mismatch_agent.justify(
-    matrix_report=bin2bin_answer,
-    diff_report=diff_answer,
-)
 log._logger.info("=== XTP Mismatch Justification Agent ===")
-log._logger.info(justification_table)
+log._logger.info(final.get("justification_table", "(no justification table)"))
 
-# ---------------------------------------------------------------------------
-# Table extraction — parse the Markdown justification table into a DataFrame.
-# ---------------------------------------------------------------------------
-
-extractor = XTPTableExtractor()
-try:
-    mismatch_df = extractor.extract(justification_table)
+if final.get("mismatch_df_json"):
+    import json
+    import io
+    import pandas as pd
+    mismatch_df = pd.read_json(io.StringIO(final["mismatch_df_json"]))
     log._logger.info("=== Mismatch Justification DataFrame ===")
     log._logger.info("\n%s", mismatch_df.to_string(index=False))
-except ValueError as exc:
-    log._logger.warning("Could not extract table: %s", exc)
-
+elif final.get("error"):
+    log._logger.warning("Could not extract table: %s", final["error"])

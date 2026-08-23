@@ -58,6 +58,8 @@ _anl_lock  = threading.Lock()
 _anl_state: dict  = {
     "running": False, "log": [], "done": False, "error": None,
     "mismatch_json": None, "justification_text": None,
+    "sha_a": "", "sha_b": "",
+    "program_a": None, "program_b": None, "diff": None,
 }
 
 _git_lock  = threading.Lock()
@@ -342,10 +344,31 @@ _tab_analyse = dbc.Tab(
     children=html.Div([
         html.Div([
             dbc.Button("▶ Run Analysis", id="btn-analyse", color="success",
-                       className="btn-action"),
+                       className="btn-action", disabled=True),
             html.Div(className="sep"),
-            _dropzone("a",   "Program A", ".xtp,.txt", "anl"),
-            _dropzone("b",   "Program B", ".xtp,.txt", "anl"),
+            # SHA inputs — same style as the Git Bin2Bin tab
+            html.Div([
+                dbc.Label("Commit SHA A", html_for="anl-sha-a", className="git-label"),
+                dbc.Input(
+                    id="anl-sha-a",
+                    placeholder="e.g. a1b2c3d…",
+                    type="text",
+                    className="git-sha-input",
+                    debounce=True,
+                ),
+            ], className="git-sha-group"),
+            html.Span("→", className="git-arrow"),
+            html.Div([
+                dbc.Label("Commit SHA B", html_for="anl-sha-b", className="git-label"),
+                dbc.Input(
+                    id="anl-sha-b",
+                    placeholder="e.g. e4f5g6h…",
+                    type="text",
+                    className="git-sha-input",
+                    debounce=True,
+                ),
+            ], className="git-sha-group"),
+            html.Div(className="sep"),
             _dropzone("bin", "Bin2Bin",   ".csv,.txt", "anl"),
             dbc.Button("↺ Refresh", id="btn-refresh-anl", outline=True,
                        color="secondary", className="ms-auto"),
@@ -804,49 +827,18 @@ def gen_close_modal(_):
 # Callbacks — Analyse tab
 # ===========================================================================
 
-# ── Upload dropzones (Analyse tab) ─────────────────────────────────────────
+# ── Enable Run Analysis button when both SHAs are non-empty ────────────────
 
 @callback(
-    Output("store-a",          "data",     allow_duplicate=True),
-    Output("body-a",           "children", allow_duplicate=True),
-    Output("badge-a",          "children", allow_duplicate=True),
-    Output("anl-dz-label-a",   "children"),
-    Output("anl-dz-a",         "className"),
-    Output("body-diff",        "children", allow_duplicate=True),
-    Input("anl-dz-a",          "contents"),
-    State("anl-dz-a",          "filename"),
-    State("store-b",           "data"),
-    prevent_initial_call=True,
+    Output("btn-analyse", "disabled"),
+    Input("anl-sha-a", "value"),
+    Input("anl-sha-b", "value"),
 )
-def anl_upload_a(contents, filename, text_b):
-    if not contents:
-        return (dash.no_update,) * 6
-    text, fname = _save_upload("a", contents, filename)
-    lbl, cls = _dz_update("Program A", ".xtp,.txt", text, fname)
-    other = text_b or _read_slot("b")[0]
-    return text, _xtp_viewer(text), fname, lbl, cls, _diff_viewer(text, other)
+def anl_enable_button(sha_a, sha_b):
+    return not (bool(sha_a and sha_a.strip()) and bool(sha_b and sha_b.strip()))
 
 
-@callback(
-    Output("store-b",          "data",     allow_duplicate=True),
-    Output("body-b",           "children", allow_duplicate=True),
-    Output("badge-b",          "children", allow_duplicate=True),
-    Output("anl-dz-label-b",   "children"),
-    Output("anl-dz-b",         "className"),
-    Output("body-diff",        "children", allow_duplicate=True),
-    Input("anl-dz-b",          "contents"),
-    State("anl-dz-b",          "filename"),
-    State("store-a",           "data"),
-    prevent_initial_call=True,
-)
-def anl_upload_b(contents, filename, text_a):
-    if not contents:
-        return (dash.no_update,) * 6
-    text, fname = _save_upload("b", contents, filename)
-    lbl, cls = _dz_update("Program B", ".xtp,.txt", text, fname)
-    other = text_a or _read_slot("a")[0]
-    return text, _xtp_viewer(text), fname, lbl, cls, _diff_viewer(other, text)
-
+# ── Upload dropzone — Bin2Bin CSV (Analyse tab) ────────────────────────────
 
 @callback(
     Output("store-bin",        "data",     allow_duplicate=True),
@@ -869,40 +861,18 @@ def anl_upload_bin(contents, filename):
 # ── Refresh (Analyse tab) ──────────────────────────────────────────────────
 
 @callback(
-    Output("body-a",           "children", allow_duplicate=True),
-    Output("body-b",           "children", allow_duplicate=True),
     Output("body-bin",         "children", allow_duplicate=True),
-    Output("badge-a",          "children", allow_duplicate=True),
-    Output("badge-b",          "children", allow_duplicate=True),
     Output("badge-bin",        "children", allow_duplicate=True),
-    Output("store-a",          "data",     allow_duplicate=True),
-    Output("store-b",          "data",     allow_duplicate=True),
     Output("store-bin",        "data",     allow_duplicate=True),
-    Output("anl-dz-label-a",   "children", allow_duplicate=True),
-    Output("anl-dz-label-b",   "children", allow_duplicate=True),
     Output("anl-dz-label-bin", "children", allow_duplicate=True),
-    Output("anl-dz-a",         "className", allow_duplicate=True),
-    Output("anl-dz-b",         "className", allow_duplicate=True),
     Output("anl-dz-bin",       "className", allow_duplicate=True),
-    Output("body-diff",        "children", allow_duplicate=True),
     Input("btn-refresh-anl",   "n_clicks"),
     prevent_initial_call=True,
 )
 def anl_refresh(_):
-    a_txt,   a_fn   = _read_slot("a")
-    b_txt,   b_fn   = _read_slot("b")
     bin_txt, bin_fn = _read_slot("bin")
-    lbl_a,   cls_a   = _dz_update("Program A", ".xtp,.txt", a_txt,   a_fn)
-    lbl_b,   cls_b   = _dz_update("Program B", ".xtp,.txt", b_txt,   b_fn)
-    lbl_bin, cls_bin = _dz_update("Bin2Bin",   ".csv,.txt", bin_txt, bin_fn)
-    return (
-        _xtp_viewer(a_txt), _xtp_viewer(b_txt), _csv_viewer(bin_txt),
-        a_fn or "—", b_fn or "—", bin_fn or "—",
-        a_txt, b_txt, bin_txt,
-        lbl_a, lbl_b, lbl_bin,
-        cls_a, cls_b, cls_bin,
-        _diff_viewer(a_txt, b_txt),
-    )
+    lbl_bin, cls_bin = _dz_update("Bin2Bin", ".csv,.txt", bin_txt, bin_fn)
+    return _csv_viewer(bin_txt), bin_fn or "—", bin_txt, lbl_bin, cls_bin
 
 
 # ── Analyse button → open modal + start thread ─────────────────────────────
@@ -912,17 +882,17 @@ def anl_refresh(_):
     Output("anl-interval", "disabled", allow_duplicate=True),
     Output("btn-analyse",  "disabled", allow_duplicate=True),
     Input("btn-analyse",   "n_clicks"),
-    State("store-a",  "data"),
-    State("store-b",  "data"),
-    State("store-bin","data"),
+    State("anl-sha-a",  "value"),
+    State("anl-sha-b",  "value"),
+    State("store-bin",  "data"),
     prevent_initial_call=True,
 )
-def anl_start(_n, text_a, text_b, text_bin):
-    # Validate — all three files must be available (from disk or store)
-    a_txt   = text_a   or (_read_slot("a")[0])
-    b_txt   = text_b   or (_read_slot("b")[0])
+def anl_start(_n, sha_a, sha_b, text_bin):
+    # Validate — both SHAs and Bin2Bin must be available
+    if not sha_a or not sha_b:
+        return dash.no_update, dash.no_update, dash.no_update
     bin_txt = text_bin or (_read_slot("bin")[0])
-    if not a_txt or not b_txt or not bin_txt:
+    if not bin_txt:
         return dash.no_update, dash.no_update, dash.no_update
 
     with _anl_lock:
@@ -931,10 +901,12 @@ def anl_start(_n, text_a, text_b, text_bin):
         _anl_state.update({
             "running": True, "log": [], "done": False,
             "error": None, "mismatch_json": None, "justification_text": None,
+            "sha_a": sha_a.strip(), "sha_b": sha_b.strip(),
+            "program_a": None, "program_b": None, "diff": None,
         })
     threading.Thread(
         target=_run_anl_pipeline,
-        args=(str(_PROG_A), str(_PROG_B), str(_BIN2BIN)),
+        args=(sha_a.strip(), sha_b.strip(), str(_BIN2BIN)),
         daemon=True,
     ).start()
     return True, False, True
@@ -946,6 +918,14 @@ def anl_start(_n, text_a, text_b, text_bin):
     Output("anl-interval",    "disabled", allow_duplicate=True),
     Output("btn-analyse",     "disabled", allow_duplicate=True),
     Output("anl-results",     "children"),
+    # ── viewer panels: populated once the pipeline finishes ────────────────
+    Output("body-a",    "children", allow_duplicate=True),
+    Output("body-b",    "children", allow_duplicate=True),
+    Output("body-diff", "children", allow_duplicate=True),
+    Output("badge-a",   "children", allow_duplicate=True),
+    Output("badge-b",   "children", allow_duplicate=True),
+    Output("store-a",   "data",     allow_duplicate=True),
+    Output("store-b",   "data",     allow_duplicate=True),
     Input("anl-interval",     "n_intervals"),
     prevent_initial_call=True,
 )
@@ -959,12 +939,24 @@ def anl_poll(_):
     ]
     done = state["done"] or bool(state["error"])
 
-    results = dash.no_update
+    _no = dash.no_update
     if done:
-        results = _build_results(state)
-        return log_children, False, True, False, results
+        prog_a = state.get("program_a") or ""
+        prog_b = state.get("program_b") or ""
+        sha_a  = state.get("sha_a", "A")
+        sha_b  = state.get("sha_b", "B")
+        label_a = f"Program_A@{sha_a[:8]}" if sha_a else "Program A"
+        label_b = f"Program_B@{sha_b[:8]}" if sha_b else "Program B"
+        return (
+            log_children, False, True, False,
+            _build_results(state),
+            _xtp_viewer(prog_a), _xtp_viewer(prog_b),
+            _diff_viewer(prog_a, prog_b),
+            label_a, label_b,
+            prog_a or _no, prog_b or _no,
+        )
 
-    return log_children, True, False, True, dash.no_update
+    return log_children, True, False, True, _no, _no, _no, _no, _no, _no, _no, _no
 
 
 @callback(
@@ -1015,22 +1007,21 @@ def _run_gen_pipeline() -> None:
             _gen_state["running"] = False
 
 
-def _run_anl_pipeline(path_a: str, path_b: str, path_bin: str) -> None:
+def _run_anl_pipeline(sha_a: str, sha_b: str, path_bin: str) -> None:
     try:
         from Helpers.Logger import AgentLogger
         from XTPAnalyser.AnalysisGraph import XTPAnalysisState, build_analysis_graph
-        from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
 
         log = AgentLogger(name="xtp_anl_dash", level="INFO")
         log.add_ui_sink(_log_anl)
 
-        comparer  = XTPFileComparer(path_a, path_b)
-        pipeline  = build_analysis_graph(logger=log)
+        pipeline = build_analysis_graph(logger=log)
 
         initial: XTPAnalysisState = {
-            "file_comparer": comparer,
-            "bin2bin_file":  path_bin,
-            "log":           log,
+            "sha_a":        sha_a,
+            "sha_b":        sha_b,
+            "bin2bin_file": path_bin,
+            "log":          log,
         }
 
         final = pipeline.invoke(initial)
@@ -1039,6 +1030,9 @@ def _run_anl_pipeline(path_a: str, path_b: str, path_bin: str) -> None:
             _anl_state["mismatch_json"]      = final.get("mismatch_df_json")
             _anl_state["justification_text"] = final.get("justification_table")
             _anl_state["error"]              = final.get("error")
+            _anl_state["program_a"]          = final.get("program_a")
+            _anl_state["program_b"]          = final.get("program_b")
+            _anl_state["diff"]               = final.get("diff")
             _anl_state["done"]    = True
             _anl_state["running"] = False
 

@@ -14,7 +14,6 @@ from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
 from RAG.xtp_rag import XTPRagCore
-from XTPAnalyser.Agents.CompareFiles import XTPFileComparer
 
 from dotenv import load_dotenv
 
@@ -62,7 +61,7 @@ You own and enforce the six core structural blocks of XTP:
 class XTPProgramDiffAgent:
     """Agent responsible for auditing, comparing, and summarizing deltas between two XTP test programs.
 
-    This agent analyzes unified diffs or side-by-side XTP scripts (Program A vs. Program B)
+    This agent analyses a unified diff (and optionally the full source of both programs)
     to identify parameter shifts across the six core XTP structural blocks: PINMAP, LEVELS,
     TIMING, PARAMETRICS, FUNCTIONS, and BINNING.
 
@@ -108,25 +107,34 @@ class XTPProgramDiffAgent:
             debug=False,
         )
 
-    def analyse(self, comparer: XTPFileComparer) -> str:
-        """Run a full diff analysis from an :class:`XTPFileComparer` instance.
+    def analyse(
+        self,
+        diff: str,
+        program_a: str = "",
+        program_b: str = "",
+    ) -> str:
+        """Run a full diff analysis from raw diff text and optional program sources.
 
         Parameters
         ----------
-        comparer:
-            A pre-built :class:`XTPFileComparer` whose ``view_a``, ``view_b``,
-            and ``diff_view`` properties are used to build the prompt.
+        diff:
+            Unified diff between Program A and Program B.
+        program_a:
+            Full source text of Program A (optional, provides extra context).
+        program_b:
+            Full source text of Program B (optional, provides extra context).
 
         Returns
         -------
         str
             Structured Markdown analysis produced by the agent.
         """
-        message = (
-            f"Provide a summary differences for: {comparer.view_a} "
-            f"and {comparer.view_b} with this diff: {comparer.diff_view}"
-        )
-        return self.invoke(message)
+        parts = ["Provide a summary of differences based on the following unified diff:\n\n", diff]
+        if program_a:
+            parts += ["\n\nProgram A (baseline):\n", program_a]
+        if program_b:
+            parts += ["\n\nProgram B (modified):\n", program_b]
+        return self.invoke("".join(parts))
 
     def invoke(self, message: str) -> str:
         """Run the expert agent with *message* and return the answer string."""

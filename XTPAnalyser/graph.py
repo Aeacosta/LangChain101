@@ -39,6 +39,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from Helpers.LangfuseCallbackHandler import get_callback
 from Helpers.Logger import AgentLogger
 
 
@@ -153,4 +154,17 @@ def build_graph(logger: AgentLogger | None = None):
     graph.add_edge("generate", "deliver")
     graph.add_edge("deliver", END)
 
-    return graph.compile()
+    compiled = graph.compile()
+
+    # Wrap invoke to automatically attach a Langfuse callback.
+    _original_invoke = compiled.invoke
+
+    def _invoke_with_langfuse(input, config=None, **kwargs):  # noqa: A002
+        _cb = get_callback(trace_name="XTPAnalyser")
+        if _cb:
+            config = config or {}
+            config.setdefault("callbacks", []).append(_cb)
+        return _original_invoke(input, config=config, **kwargs)
+
+    compiled.invoke = _invoke_with_langfuse  # type: ignore[method-assign]
+    return compiled

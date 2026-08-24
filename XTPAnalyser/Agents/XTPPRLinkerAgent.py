@@ -7,9 +7,9 @@ Architecture — three separate agent classes
   XTPPRDiscoveryAgent   (Phase 1)
       Uses create_agent + GitHub MCP tools.
       Calls list_pull_requests on Aeacosta-CenfoTec/XTPProgram to retrieve
-      every PR, then uses get_pull_request to enrich each one.
-      Filters the list to PRs whose merge_commit_sha falls in the sha_a..sha_b
-      range and returns a compact JSON catalogue.
+      every PR, then identifies which ones fall in the sha_a..sha_b range by
+      comparing each PR's head.sha / base.sha against the provided SHAs.
+      Returns a compact JSON catalogue.
 
   XTPPRMatcherAgent     (Phase 2)
       Uses create_agent — NO tools.
@@ -43,6 +43,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
+from Helpers.LangfuseCallbackHandler import get_callback
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
 
@@ -127,12 +128,13 @@ def _extract_json_object(text: str) -> str:
 # Shared LLM factory
 # ---------------------------------------------------------------------------
 
-def _build_model() -> ChatOpenAI:
+def _build_model(callbacks: list | None = None) -> ChatOpenAI:
     return ChatOpenAI(
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
         openai_api_key=os.getenv("LLM_API_KEY"),
         openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
         temperature=0.0,
+        callbacks=callbacks or [],
     )
 
 # ===========================================================================
@@ -147,23 +149,31 @@ Repository : {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}
 ### YOUR TASK
 The user message provides SHA_A (baseline commit) and SHA_B (modified commit).
 Use the GitHub MCP tools to retrieve ALL Pull Requests in the repository,
-then identify which ones were merged between SHA_A and SHA_B.
+then identify which ones fall within the SHA_A..SHA_B range.
+
+### HOW TO IDENTIFY THE CORRECT PR(S)
+Each closed PR in the list contains:
+  - head.sha  — the tip commit of the feature branch that was merged.
+  - base.sha  — the commit on the target branch the PR was based on.
+
+A PR belongs to the SHA_A..SHA_B range when EITHER of these match:
+  - head.sha starts with SHA_B  (the PR's tip IS the modified commit)
+  - base.sha starts with SHA_A  (the PR was branched from the baseline commit)
+  - head.sha starts with SHA_A  OR base.sha starts with SHA_B
+
+Check using startswith because the user may supply abbreviated (7-char) SHAs.
+When in doubt, include the PR rather than exclude it.
 
 ### STEPS — follow them in exactly this order:
 1. Call `list_pull_requests` with:
      owner = "{GITHUB_REPO_OWNER}"
      repo  = "{GITHUB_REPO_NAME}"
      state = "closed"
-   This returns the closed (and merged) PRs.
+   This returns the closed (and merged) PRs with head.sha and base.sha.
 
-2. For each PR whose merge_commit_sha is non-null, check whether it belongs to
-   the commit range SHA_A..SHA_B.  If you cannot determine this from the
-   list alone, call `get_pull_request` for that PR to get the full details
-   including merge_commit_sha.
-
-3. A PR is "in range" when its merge_commit_sha equals SHA_B, or when it was
-   merged after SHA_A was created and at or before SHA_B.  When in doubt,
-   include the PR rather than exclude it.
+2. For each PR, compare head.sha and base.sha against SHA_A and SHA_B as
+   described above.  Do NOT use merge_commit_sha for range filtering — it is
+   the merge commit on main and will not match the provided SHAs.
 
 ### OUTPUT FORMAT
 Return ONLY a JSON array — no prose, no markdown fences:
@@ -224,7 +234,9 @@ class XTPPRDiscoveryAgent:
             )
             return []
 
-        model = _build_model()
+        _cb = get_callback(trace_name="XTPPRDiscoveryAgent")
+        _cbs = [_cb] if _cb else []
+        model = _build_model(callbacks=_cbs)
         log.debug("[Discovery] LLM: %s @ %s", os.getenv("LLM_MODEL"), os.getenv("LLM_API_BASE"))
 
         agent = create_agent(
@@ -246,7 +258,8 @@ class XTPPRDiscoveryAgent:
         raw = ""
         try:
             result = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": user_message}]}
+                {"messages": [{"role": "user", "content": user_message}]},
+                config={"callbacks": _cbs},
             )
 
             # ── log every message in the agent conversation ───────────────
@@ -258,7 +271,7 @@ class XTPPRDiscoveryAgent:
                 calls   = getattr(msg, "tool_calls", [])
                 if calls:
                     log.debug(
-                        "[Discovery] [%d] %s → tool_calls: %s",
+                        "[Discovery] [%d] %s -> tool_calls: %s",
                         i, role,
                         [{"name": c.get("name"), "args_preview": str(c.get("args",""))[:120]}
                          for c in calls],
@@ -342,7 +355,9 @@ class XTPPRMatcherAgent:
 
     def __init__(self, logger: AgentLogger | None = None) -> None:
         self._log = logger or AgentLogger(name="xtp_pr_matcher", level="DEBUG")
-        model = _build_model()
+        _cb = get_callback(trace_name="XTPPRMatcherAgent")
+        self._callbacks = [_cb] if _cb else []
+        model = _build_model(callbacks=self._callbacks)
         self._agent = create_agent(
             model=model,
             tools=[],
@@ -387,7 +402,8 @@ class XTPPRMatcherAgent:
         raw_answer = ""
         try:
             result = await self._agent.ainvoke(
-                {"messages": [{"role": "user", "content": user_message}]}
+                {"messages": [{"role": "user", "content": user_message}]},
+                config={"callbacks": self._callbacks},
             )
             raw_answer = result["messages"][-1].content.strip()
             log.debug("[Matcher] Raw answer: %s", raw_answer[:400])

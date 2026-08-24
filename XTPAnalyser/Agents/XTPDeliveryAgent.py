@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
+from Helpers.LangfuseCallbackHandler import get_callback
 
 _SYSTEM_PROMPT = """
 You are a File System Management Agent. Your only job is to save three pre-extracted assets to disk.
@@ -104,11 +105,15 @@ class XTPDeliveryAgent:
             except Exception as e:
                 return f"ERROR: Failed to write file {file_name}. Details: {str(e)}"
 
+        _cb = get_callback(trace_name="XTPDeliveryAgent")
+        self._callbacks = [_cb] if _cb else []
+
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.5,
+            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -185,5 +190,8 @@ class XTPDeliveryAgent:
             f"BIN2BIN_CSV:\n{csv_content}"
         )
 
-        result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
+        result = self._agent.invoke(
+            {"messages": [{"role": "user", "content": message}]},
+            config={"callbacks": self._callbacks},
+        )
         return result["messages"][-1].content

@@ -1,15 +1,15 @@
 """GitHub PR creator — uses the GitHub MCP server via langchain-mcp-adapters.
 
-Workflow per finding
---------------------
-For each finding in the report that carries a non-empty ``diff``:
-1. Compute the file content with **only that finding's diff** applied.
-2. Create a branch  ``codesmell/<stem>-f<id>-<timestamp>``  off ``main``.
-3. Push the single-finding-patched file to that branch.
+Workflow
+--------
+1. Take the combined patched file content already computed by patch_file_node
+   (stored in report["_patchContent"]) — or read it from disk as a fallback.
+2. Create a branch  ``codesmell/<stem>-<timestamp>``  off ``main``.
+3. Push the patched file to that branch.
 4. Open a pull request from that branch into ``main``.
 
-Returns a list of result dicts, one per finding:
-    [{"finding_id": 1, "smell": "...", "branch": "...", "url": "https://..."}, ...]
+Returns a list with one result dict:
+    [{"finding_id": "all", "smell": "combined", "branch": "...", "url": "https://..."}]
 
 Supported target repositories
 ------------------------------
@@ -35,7 +35,6 @@ import time
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from Helpers.FilePatcher import git_apply_patch, preview_patch, preview_patch_single_finding
 from Helpers.Logger import AgentLogger
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
@@ -88,55 +87,43 @@ def resolve_repo(file_path: str) -> tuple[str, str, str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# PR body builder (single finding)
+# PR body builder (all findings combined)
 # ---------------------------------------------------------------------------
 
-def _build_pr_body_for_finding(finding: dict, report: dict, file_path: str) -> tuple[str, str]:
-    """Return ``(title, body)`` for a single-finding PR."""
-    file_name = report.get("fileName") or os.path.basename(file_path)
-    fid       = finding.get("id", "?")
-    smell     = finding.get("smell", "unknown")
-    severity  = finding.get("severity", "Low")
-    desc      = finding.get("description", "")
-    rec       = finding.get("recommendation", "")
-    diff_text = (finding.get("diff") or "").strip()
-    rag       = finding.get("ragReference", "")
+def _build_pr_body(report: dict, file_path: str) -> tuple[str, str]:
+    """Return ``(title, body)`` for the combined-findings PR."""
+    file_name    = report.get("fileName") or os.path.basename(file_path)
+    findings     = report.get("findings", [])
+    score        = report.get("scoreReport") or {}
 
-    title = f"[CodeSmell #{fid}] {smell} in {file_name}"
-
-    loc      = finding.get("location", {})
-    loc_parts = [loc.get("fileName", "")]
-    if loc.get("className"):
-        loc_parts.append(loc["className"])
-    if loc.get("methodName"):
-        loc_parts.append(loc["methodName"])
-    s, e = loc.get("startLine"), loc.get("endLine")
-    if s and e:
-        loc_parts.append(f"L{s}–{e}")
-    elif s:
-        loc_parts.append(f"L{s}")
-    loc_str = " › ".join(filter(None, loc_parts))
+    n_findings = len([f for f in findings if (f.get("diff") or "").strip()])
+    title = f"[CodeSmell] {n_findings} fix(es) in {file_name}"
 
     lines: list[str] = [
-        f"## Fix #{fid} — {smell} `[{severity}]`",
+        f"## Code Smell Fixes — `{file_name}`",
         "",
-        f"**File:** `{file_name}`",
-        f"**Location:** {loc_str}" if loc_str else "",
+        f"This PR contains **{n_findings} automated fix(es)** produced by the "
+        "Code Smell Analyzer.",
         "",
-        desc,
+        "### Findings addressed",
         "",
     ]
 
-    if rec:
-        lines += [f"**Recommendation:** {rec}", ""]
+    for f in sorted(findings, key=lambda x: x.get("id", 0)):
+        if not (f.get("diff") or "").strip():
+            continue
+        fid      = f.get("id", "?")
+        smell    = f.get("smell", "unknown")
+        severity = f.get("severity", "Low")
+        desc     = f.get("description", "")
+        rec      = f.get("recommendation", "")
+        lines.append(f"#### #{fid} — {smell} `[{severity}]`")
+        if desc:
+            lines += ["", desc]
+        if rec:
+            lines += ["", f"**Recommendation:** {rec}"]
+        lines.append("")
 
-    if diff_text:
-        lines += ["### Proposed diff", "", "```diff", diff_text, "```", ""]
-
-    if rag:
-        lines += [f"**Reference:** {rag}", ""]
-
-    score = report.get("scoreReport") or {}
     if score:
         grade = score.get("grade", "?")
         pts   = score.get("score", "?")
@@ -151,7 +138,7 @@ def _build_pr_body_for_finding(finding: dict, report: dict, file_path: str) -> t
 
 
 # ---------------------------------------------------------------------------
-# Core async function — one PR per finding
+# Core async function
 # ---------------------------------------------------------------------------
 
 async def create_pr_per_finding(
@@ -159,56 +146,66 @@ async def create_pr_per_finding(
     file_path: str,
     finding_patches: list[dict] | None = None,
 ) -> list[dict]:
-    """Create one GitHub branch + PR for every finding that has a diff.
+    """Create one GitHub branch + PR containing all fixes for the file.
+
+    The patched file content is taken directly from ``report["_patchContent"]``
+    (written by patch_file_node) or read from disk as a fallback.  No diff
+    application happens here — the file is used as-is.
 
     Parameters
     ----------
     report          : parsed CodeSmellReport dict.
     file_path       : local or GitHub path of the analysed file.
-    finding_patches : pre-computed list of per-finding patch results.
-                      Each entry: ``{"finding_id": int, "patched": str, ...}``.
-                      When ``None`` or empty the function computes them on the fly.
+    finding_patches : unused; kept for API compatibility.
 
     Returns
     -------
     list[dict]
-        One entry per successfully created PR:
-        ``{"finding_id": int, "smell": str, "branch": str, "url": str}``.
-        Failures are logged and skipped.
+        One entry on success:
+        ``{"finding_id": "all", "smell": "combined", "branch": str, "url": str}``.
     """
     resolved = resolve_repo(file_path)
     if resolved is None:
-        _log._logger.info("create_pr_per_finding — no matching repo for: %s", file_path)
+        _log._logger.info("create_pr — no matching repo for: %s", file_path)
         return []
 
     owner, repo, base_branch, repo_file_path = resolved
 
     github_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "")
     if not github_token:
-        _log._logger.error("create_pr_per_finding — GITHUB_PERSONAL_ACCESS_TOKEN not set")
+        _log._logger.error("create_pr — GITHUB_PERSONAL_ACCESS_TOKEN not set")
         return []
 
-    # ── Build a lookup: finding_id → patched content ──────────────────────────
-    patch_lookup: dict[int, str] = {}
-    if finding_patches:
-        for fp in finding_patches:
-            fid = fp.get("finding_id")
-            if fid is not None and fp.get("patched"):
-                patch_lookup[fid] = fp["patched"]
+    # ── Resolve patched content ───────────────────────────────────────────────
+    # Prefer the content already computed and written by patch_file_node.
+    patched_content: str = report.get("_patchContent", "")
 
-    # Also cache the original text stored in the report (set by merge_node) so
-    # the on-the-fly fallback never reads from the already-modified disk file.
-    original_text: str = report.get("_patchOriginal", "")
+    if not patched_content:
+        # Fallback: read the file from disk (patch_file_node wrote it there).
+        local_path = file_path if os.path.exists(file_path) else ""
+        if local_path:
+            _log._logger.warning("create_pr — _patchContent missing; reading from disk: %s", local_path)
+            with open(local_path, encoding="utf-8") as fh:
+                patched_content = fh.read()
 
-    findings = [f for f in report.get("findings", []) if (f.get("diff") or "").strip()]
-    if not findings:
-        _log._logger.info("create_pr_per_finding — no findings with diffs; nothing to do")
+    if not patched_content:
+        _log._logger.error("create_pr — no patched content available; skipping PR")
+        return []
+
+    findings_with_diff = [f for f in report.get("findings", []) if (f.get("diff") or "").strip()]
+    if not findings_with_diff:
+        _log._logger.info("create_pr — no findings with diffs; nothing to do")
         return []
 
     stem      = os.path.splitext(os.path.basename(repo_file_path))[0]
     timestamp = int(time.time())
+    head_branch = f"codesmell/{stem}-{timestamp}"
 
-    # ── Open one shared MCP client for all PRs ────────────────────────────────
+    title, body = _build_pr_body(report, file_path)
+
+    _log._logger.info("🐙 create_pr — branch: %s", head_branch)
+
+    # ── Open MCP client ───────────────────────────────────────────────────────
     client = MultiServerMCPClient(
         {
             "github": {
@@ -230,89 +227,52 @@ async def create_pr_per_finding(
             )
         return tool_map[name]
 
-    results: list[dict] = []
+    try:
+        # Step 1: create branch
+        await _get_tool("create_branch").ainvoke({
+            "owner":       owner,
+            "repo":        repo,
+            "branch":      head_branch,
+            "from_branch": base_branch,
+        })
 
-    for finding in sorted(findings, key=lambda f: f.get("id", 0)):
-        fid   = finding.get("id", 0)
-        smell = finding.get("smell", "")
+        # Step 2: push patched file
+        await _get_tool("create_or_update_file").ainvoke({
+            "owner":   owner,
+            "repo":    repo,
+            "path":    repo_file_path,
+            "message": f"fix: apply {len(findings_with_diff)} code smell fix(es) in {repo_file_path}",
+            "content": patched_content,
+            "branch":  head_branch,
+        })
 
-        # ── Resolve patched content for this single finding ───────────────────
-        patched_content = patch_lookup.get(fid, "")
-        if not patched_content:
-            # Fallback: apply this finding's diff against the original text.
-            # Never read from disk here — the file may already be combined-patched.
-            if original_text:
-                _log._logger.warning(
-                    "finding #%s — patch_lookup miss; recomputing from _patchOriginal", fid
-                )
-                pr_result = preview_patch_single_finding(original_text, finding, file_path)
-                patched_content = pr_result.patched
-            else:
-                _log._logger.warning(
-                    "finding #%s — patch_lookup miss AND no _patchOriginal; falling back to disk", fid
-                )
-                single_report = {**report, "findings": [finding]}
-                pr_result = preview_patch(single_report)
-                patched_content = pr_result.patched if pr_result else ""
+        # Step 3: open PR
+        pr_resp = await _get_tool("create_pull_request").ainvoke({
+            "owner": owner,
+            "repo":  repo,
+            "title": title,
+            "body":  body,
+            "head":  head_branch,
+            "base":  base_branch,
+        })
 
-            if not patched_content:
-                _log._logger.warning(
-                    "create_pr_per_finding — could not patch finding #%s; skipping", fid
-                )
-                continue
+        if isinstance(pr_resp, dict):
+            pr_url = pr_resp.get("html_url", "")
+        else:
+            m = re.search(r"https://github\.com/[^\s>\"']+/pull/\d+", str(pr_resp))
+            pr_url = m.group(0) if m else str(pr_resp)
 
-        head_branch = f"codesmell/{stem}-f{fid}-{timestamp}"
-        title, body = _build_pr_body_for_finding(finding, report, file_path)
+        _log._logger.info("PR created: %s", pr_url)
+        return [{
+            "finding_id": "all",
+            "smell":      "combined",
+            "branch":     head_branch,
+            "url":        pr_url,
+        }]
 
-        _log._logger.info("🐙 finding #%s — branch: %s", fid, head_branch)
-
-        try:
-            # Step 1: create branch
-            await _get_tool("create_branch").ainvoke({
-                "owner":       owner,
-                "repo":        repo,
-                "branch":      head_branch,
-                "from_branch": base_branch,
-            })
-
-            # Step 2: push single-finding-patched file
-            await _get_tool("create_or_update_file").ainvoke({
-                "owner":   owner,
-                "repo":    repo,
-                "path":    repo_file_path,
-                "message": f"fix: #{fid} {smell} in {repo_file_path}",
-                "content": patched_content,
-                "branch":  head_branch,
-            })
-
-            # Step 3: open PR
-            pr_resp = await _get_tool("create_pull_request").ainvoke({
-                "owner": owner,
-                "repo":  repo,
-                "title": title,
-                "body":  body,
-                "head":  head_branch,
-                "base":  base_branch,
-            })
-
-            if isinstance(pr_resp, dict):
-                pr_url = pr_resp.get("html_url", "")
-            else:
-                m = re.search(r"https://github\.com/[^\s>\"']+/pull/\d+", str(pr_resp))
-                pr_url = m.group(0) if m else str(pr_resp)
-
-            _log._logger.info("PR created for finding #%s: %s", fid, pr_url)
-            results.append({
-                "finding_id": fid,
-                "smell":      smell,
-                "branch":     head_branch,
-                "url":        pr_url,
-            })
-
-        except Exception as exc:  # noqa: BLE001
-            _log._logger.error("create_pr_per_finding — finding #%s failed: %s", fid, exc)
-
-    return results
+    except Exception as exc:  # noqa: BLE001
+        _log._logger.error("create_pr — failed: %s", exc)
+        return []
 
 
 # ---------------------------------------------------------------------------

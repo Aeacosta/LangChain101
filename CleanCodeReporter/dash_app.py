@@ -241,13 +241,12 @@ def show_pr_banner(pr_urls: list | None):
 
     items = []
     for entry in pr_urls:
-        url   = entry.get("url", "")
-        fid   = entry.get("finding_id", "?")
-        smell = entry.get("smell", "")
+        url    = entry.get("url", "")
+        branch = entry.get("branch", "")
         if not url.startswith("https://github.com"):
             continue
         items.append(html.Li([
-            html.Strong(f"#{fid} {smell}: "),
+            html.Strong(f"{branch}: "),
             html.A(url, href=url, target="_blank", rel="noopener noreferrer"),
         ]))
 

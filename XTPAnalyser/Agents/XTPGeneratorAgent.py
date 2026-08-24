@@ -18,6 +18,7 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
+from Helpers.LangfuseCallbackHandler import get_callback
 from RAG.xtp_rag import XTPRagCore
 
 _SYSTEM_PROMPT = """
@@ -185,11 +186,15 @@ class XTPGeneratorAgent:
             ]
             return json.dumps(random.choice(scenarios), indent=2)
 
+        _cb = get_callback(trace_name="XTPGeneratorAgent")
+        self._callbacks = [_cb] if _cb else []
+
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.1,
+            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -213,5 +218,8 @@ class XTPGeneratorAgent:
             f"```xtp\n{xtp_program}\n```\n\n"
             "Apply a random parametric delta and produce Program B + Bin2Bin CSV."
         )
-        result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
+        result = self._agent.invoke(
+            {"messages": [{"role": "user", "content": message}]},
+            config={"callbacks": self._callbacks},
+        )
         return result["messages"][-1].content

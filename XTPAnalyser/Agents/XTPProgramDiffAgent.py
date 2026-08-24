@@ -13,6 +13,7 @@ from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
+from Helpers.LangfuseCallbackHandler import get_callback
 from RAG.xtp_rag import XTPRagCore
 
 from dotenv import load_dotenv
@@ -45,7 +46,7 @@ You own and enforce the six core structural blocks of XTP:
 
 2. SILICON PHYSICS & PARAMETRIC IMPACT
    - Do NOT just list syntax additions/deletions; explain the physical silicon consequences of every delta.
-   - Trace how parameter shifts affect device execution (e.g., a drop in $V_{DD\_CORE}$ increases gate propagation delay, narrowing setup/hold margins and risking timing faults in `SB_4001` or forcing downbins into `SB_1003`).
+   - Trace how parameter shifts affect device execution (e.g., a drop in $V_{DD\\_CORE}$ increases gate propagation delay, narrowing setup/hold margins and risking timing faults in `SB_4001` or forcing downbins into `SB_1003`).
 
 3. RIGOROUS STEP-BY-STEP DECOMPOSITION
    - Open immediately with technical substance. Eliminate all conversational filler (e.g., "Here is the diff analysis...").
@@ -93,11 +94,15 @@ class XTPProgramDiffAgent:
                 for r in results
             )
 
+        _cb = get_callback(trace_name="XTPProgramDiffAgent")
+        self._callbacks = [_cb] if _cb else []
+
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.1,
+            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -139,6 +144,9 @@ class XTPProgramDiffAgent:
     def invoke(self, message: str) -> str:
         """Run the expert agent with *message* and return the answer string."""
         self._log._logger.debug("[XTPProgramDiffAgent] Question: %s", message)
-        result = self._agent.invoke({"messages": [{"role": "user", "content": message}]})
+        result = self._agent.invoke(
+            {"messages": [{"role": "user", "content": message}]},
+            config={"callbacks": self._callbacks},
+        )
         return result["messages"][-1].content
 

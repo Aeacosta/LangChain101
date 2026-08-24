@@ -61,22 +61,32 @@ class GraphState(TypedDict):
 
     Fields
     ------
-    file_path       : absolute or relative path of the C# file to analyze.
-    raw_response    : free-text LLM analysis produced by the analyzer node.
-    report_json     : raw JSON string produced by the formatter node.
-    report          : parsed report as a plain dict (post-formatter).
-    score_json      : raw JSON string produced by the scorer node.
-    patched         : True once the corrected file has been written to disk.
-    valid_json      : True when report_json parses successfully.
-    error           : last error message, if any node failed.
-    pr_url          : HTML URL of the GitHub PR created after analysis, or "".
+    file_path        : absolute or relative path of the C# file to analyze.
+    raw_response     : free-text LLM analysis produced by the analyzer node.
+    report_json      : raw JSON string produced by the formatter node.
+    report           : parsed report as a plain dict (post-formatter).
+    score_json       : raw JSON string produced by the scorer node.
+    patched          : True once the corrected file has been written to disk.
+    patch_content    : full text of the combined-patched file (all findings).
+    patch_diff       : unified diff for the combined patch.
+    patch_original   : original file content before any patches were applied.
+    finding_patches  : list of per-finding patch results
+                       [{"finding_id", "patched", "unified_diff", "errors"}, ...].
+    valid_json       : True when report_json parses successfully.
+    error            : last error message, if any node failed.
+    pr_urls          : list of PR result dicts created by create_pr_node
+                       [{"finding_id", "smell", "branch", "url"}, ...].
     """
-    file_path:     str
-    raw_response:  str
-    report_json:   str
-    report:        dict[str, Any]
-    score_json:    str
-    patched:       bool
-    valid_json:    bool
-    error:         str
-    pr_url:        str
+    file_path:       str
+    raw_response:    str
+    report_json:     str
+    report:          dict[str, Any]
+    score_json:      str
+    patched:         bool
+    patch_content:   str
+    patch_diff:      str
+    patch_original:  str
+    finding_patches: list
+    valid_json:      bool
+    error:           str
+    pr_urls:         list

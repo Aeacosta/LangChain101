@@ -59,6 +59,7 @@ _anl_state: dict  = {
     "running": False, "log": [], "done": False, "error": None,
     "mismatch_json": None, "justification_text": None,
     "pr_links_json": None, "pr_summary_md": None,
+    "response_xtp_diff": None,
     "sha_a": "", "sha_b": "",
     "program_a": None, "program_b": None, "diff": None,
 }
@@ -120,7 +121,7 @@ def _xtp_viewer(text: str | None) -> html.Div:
 
 
 def _diff_viewer(text_a: str | None, text_b: str | None) -> html.Div:
-    """Render a unified diff of two XTP texts as a syntax-coloured block."""
+    """Render a coloured unified diff block for two XTP texts."""
     if not text_a and not text_b:
         return html.Div("Load both programs to see the diff", className="empty-state")
     if not text_a:
@@ -152,6 +153,53 @@ def _diff_viewer(text_a: str | None, text_b: str | None) -> html.Div:
         spans.append(html.Span(line_str + "\n", className=cls))
 
     return html.Pre(spans, className="xtp-code diff-view")
+
+
+def _full_diff_panel(
+    text_a: str | None,
+    text_b: str | None,
+    response_xtp_diff: str | None = None,
+    pr_summary_md: str | None = None,
+) -> html.Div:
+    """Render the full Diff panel: coloured unified diff + LLM analysis + PR summary."""
+    sections: list = []
+
+    # ── 1. Coloured unified diff ─────────────────────────────────────────────
+    sections.append(
+        html.Div([
+            html.Div("◈ Unified Diff", className="diff-section-title"),
+            _diff_viewer(text_a, text_b),
+        ], className="diff-section")
+    )
+
+    # ── 2. LLM diff analysis (all recommendations) ──────────────────────────
+    if response_xtp_diff:
+        sections.append(
+            html.Div([
+                html.Div("◈ XTP Program Diff Analysis", className="diff-section-title"),
+                dcc.Markdown(
+                    response_xtp_diff,
+                    className="diff-analysis-md",
+                    dangerously_allow_html=False,
+                ),
+            ], className="diff-section")
+        )
+
+    # ── 3. PR summary ────────────────────────────────────────────────────────
+    if pr_summary_md:
+        sections.append(
+            html.Div([
+                html.Div("◈ PR Summary", className="diff-section-title"),
+                dcc.Markdown(
+                    pr_summary_md,
+                    className="diff-analysis-md",
+                    dangerously_allow_html=False,
+                    link_target="_blank",
+                ),
+            ], className="diff-section")
+        )
+
+    return html.Div(sections, className="full-diff-panel")
 
 
 def _csv_viewer(text: str | None) -> html.Div:
@@ -632,6 +680,33 @@ body { font-family: -apple-system,"Segoe UI",system-ui,sans-serif;
 
 /* Widen the results panel when it contains a diff */
 .results-panel { max-height:60vh !important; }
+
+/* Full diff panel — stacked sections inside body-diff */
+.full-diff-panel { display:flex; flex-direction:column; gap:0; height:100%; }
+.diff-section { display:flex; flex-direction:column; border-bottom:1px solid #1e293b; }
+.diff-section:last-child { border-bottom:none; flex:1; min-height:0; }
+.diff-section-title { font-size:.70rem; font-weight:700; letter-spacing:.10em;
+  text-transform:uppercase; color:#7c5cd8; background:#0f111a;
+  padding:5px 16px; border-bottom:1px solid #1e293b; flex-shrink:0; }
+
+/* Markdown rendered inside the diff panel */
+.diff-analysis-md { padding:14px 20px; font-size:.80rem; line-height:1.7;
+  color:#cbd5e1; overflow:auto; background:#0c0f1a; }
+.diff-analysis-md h1,.diff-analysis-md h2,.diff-analysis-md h3 {
+  color:#a78bfa; margin:14px 0 6px; font-size:.88rem; }
+.diff-analysis-md h4,.diff-analysis-md h5 {
+  color:#94a3b8; margin:10px 0 4px; font-size:.82rem; }
+.diff-analysis-md strong { color:#e2e8f0; }
+.diff-analysis-md table { border-collapse:collapse; width:100%;
+  margin:10px 0; font-size:.75rem; }
+.diff-analysis-md th { background:#1e293b; color:#a78bfa;
+  padding:5px 10px; border:1px solid #2d3748; text-align:left; }
+.diff-analysis-md td { padding:4px 10px; border:1px solid #2d3748;
+  color:#cbd5e1; background:#0c0f1a; }
+.diff-analysis-md tr:nth-child(even) td { background:#111827; }
+.diff-analysis-md code { background:#1e293b; color:#f472b6;
+  padding:1px 5px; border-radius:3px; font-size:.74rem; }
+.diff-analysis-md a { color:#60a5fa; }
 </style>
 </head>
 <body>
@@ -903,6 +978,7 @@ def anl_start(_n, sha_a, sha_b, text_bin):
             "running": True, "log": [], "done": False,
             "error": None, "mismatch_json": None, "justification_text": None,
             "pr_links_json": None, "pr_summary_md": None,
+            "response_xtp_diff": None,
             "sha_a": sha_a.strip(), "sha_b": sha_b.strip(),
             "program_a": None, "program_b": None, "diff": None,
         })
@@ -953,7 +1029,11 @@ def anl_poll(_):
             log_children, False, True, False,
             _build_results(state),
             _xtp_viewer(prog_a), _xtp_viewer(prog_b),
-            _diff_viewer(prog_a, prog_b),
+            _full_diff_panel(
+                prog_a, prog_b,
+                response_xtp_diff=state.get("response_xtp_diff"),
+                pr_summary_md=state.get("pr_summary_md"),
+            ),
             label_a, label_b,
             prog_a or _no, prog_b or _no,
         )
@@ -1033,6 +1113,7 @@ def _run_anl_pipeline(sha_a: str, sha_b: str, path_bin: str) -> None:
             _anl_state["justification_text"] = final.get("justification_table")
             _anl_state["pr_links_json"]      = final.get("pr_links_json")
             _anl_state["pr_summary_md"]      = final.get("pr_summary_md")
+            _anl_state["response_xtp_diff"]  = final.get("response_xtp_diff")
             _anl_state["error"]              = final.get("error")
             _anl_state["program_a"]          = final.get("program_a")
             _anl_state["program_b"]          = final.get("program_b")

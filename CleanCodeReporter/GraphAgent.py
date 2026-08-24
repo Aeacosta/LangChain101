@@ -8,7 +8,7 @@ Flow (mirrors the Mermaid diagram):
                   ├─ No ──► Leer Archivos   (retry loop)
                   └─ Sí ──► Extraer Reporte
                               ├──► Calificar Reporte  ─┐
-                              └──► Escribir Archivo   ─┴─► Merge ──► Crear PR? ──► Fin
+                              └──► Escribir Archivo   ─┴─► Merge ──► Crear PRs? ──► Fin
 
 Nodes
 -----
@@ -17,25 +17,36 @@ validate_json_node  — passes the raw response through the JSON formatter and
                       checks whether the result is valid JSON.
 extract_report_node — assembles the final report dict (injects prompt_response).
 score_report_node   — runs the scorer; writes score_json only.
-patch_file_node     — applies unified diffs and writes the corrected file; writes patched only.
-merge_node          — recombines score_json into report.scoreReport after the parallel branches.
-create_pr_node      — creates a GitHub branch + PR when the file belongs to a tracked repo.
+patch_file_node     — applies unified diffs and writes the corrected file.
+                      Computes both the combined patch (all findings) and a
+                      per-finding patch list; writes disjoint keys only.
+merge_node          — recombines score_json + patch data into report after
+                      the parallel branches.
+create_pr_node      — creates one GitHub branch + PR per finding when the
+                      file belongs to a tracked repo.
 
 LangGraph rule: nodes that run in parallel (fan-out from the same parent) must
-write to **disjoint** state keys.  score_report_node owns `score_json`; patch_file_node
-owns `patched`.  merge_node runs after both branches finish and folds the score
-data back into `report`.
+write to **disjoint** state keys.  score_report_node owns `score_json`;
+patch_file_node owns `patched`, `patch_content`, `patch_diff`,
+`patch_original`, and `finding_patches`.
+merge_node runs after both branches finish.
 """
 
 from __future__ import annotations
 
 import json
+import os
 
 from langgraph.graph import END, START, StateGraph
 
 from .agent_setup import agent as _agent
-from .GithubPRAgent import create_pull_request_sync, resolve_repo
-from Helpers.FilePatcher import apply_fixes
+from .GithubPRAgent import create_pr_per_finding_sync, resolve_repo
+from Helpers.FilePatcher import (
+    apply_fixes,
+    git_apply_patch,
+    preview_patch,
+    preview_patch_single_finding,
+)
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
 from Helpers.Logger import AgentLogger
 from Helpers.ScorerAgent import ScorerAgent
@@ -147,64 +158,169 @@ def score_report_node(state: GraphState) -> dict:
 def patch_file_node(state: GraphState) -> dict:
     """Node: Escribir Archivo corregido.
 
-    Applies all unified diffs from the report findings to the source file.
-    Writes ONLY `patched` so it stays disjoint from score_report_node.
+    1. Reads the original file once.
+    2. Computes a per-finding PatchResult for every finding that has a diff.
+    3. Computes the combined PatchResult (all findings applied sequentially).
+    4. Writes the combined-patched content to disk.
+
+    Writes ONLY `patched`, `patch_content`, `patch_diff`, `patch_original`,
+    and `finding_patches` — all disjoint from score_report_node.
     """
     _log._logger.info("🔧 patch_file_node")
     report = state.get("report", {})
 
     try:
-        apply_fixes(report, logger=_log)
-        _log._logger.info("patch_file_node — file patched ✓")
-        return {"patched": True}
+        # ── Read original file ────────────────────────────────────────────────
+        file_path: str = report.get("fileName", "")
+        if not file_path or not os.path.exists(file_path):
+            _log._logger.warning("patch_file_node — source file not found: %s", file_path)
+            return {
+                "patched":         False,
+                "patch_content":   "",
+                "patch_diff":      "",
+                "patch_original":  "",
+                "finding_patches": [],
+            }
+
+        with open(file_path, encoding="utf-8") as fh:
+            original = fh.read()
+
+        # ── Per-finding patches (each applied to original independently) ──────
+        finding_patches: list[dict] = []
+        for finding in sorted(report.get("findings", []), key=lambda f: f.get("id", 0)):
+            if not (finding.get("diff") or "").strip():
+                continue
+            pr = preview_patch_single_finding(original, finding, file_path)
+            finding_patches.append({
+                "finding_id":   finding.get("id"),
+                "smell":        finding.get("smell", ""),
+                "patched":      pr.patched,
+                "unified_diff": pr.unified_diff,
+                "errors":       pr.errors,
+            })
+            _log._logger.debug(
+                "patch_file_node — finding #%s diff lines: %d",
+                finding.get("id"), len(pr.unified_diff.splitlines()),
+            )
+
+        # ── Combined patch (all findings applied sequentially) ────────────────
+        combined_pr = git_apply_patch(report, logger=_log) or preview_patch(report)
+        if combined_pr is None:
+            _log._logger.warning("patch_file_node — combined patch returned None")
+            report["_patchOriginal"]  = original
+            report["_findingPatches"] = finding_patches
+            return {
+                "report":          report,
+                "patched":         False,
+                "patch_content":   original,
+                "patch_diff":      "",
+                "patch_original":  original,
+                "finding_patches": finding_patches,
+            }
+
+        # Write combined-patched content to disk.
+        with open(combined_pr.file_path, "w", encoding="utf-8") as fh:
+            fh.write(combined_pr.patched)
+
+        _log._logger.info(
+            "patch_file_node — combined patch written ✓  (%d per-finding patches)",
+            len(finding_patches),
+        )
+
+        # Embed patch metadata directly into report so merge_node and
+        # create_pr_node always have access regardless of LangGraph fan-in
+        # state-key merging behaviour.
+        report["_patchOriginal"]  = original
+        report["_findingPatches"] = finding_patches
+
+        return {
+            "report":          report,
+            "patched":         True,
+            "patch_content":   combined_pr.patched,
+            "patch_diff":      combined_pr.unified_diff,
+            "patch_original":  original,
+            "finding_patches": finding_patches,
+        }
+
     except Exception as exc:
         _log._logger.error("patch_file_node — error: %s", exc)
-        return {"patched": False, "error": str(exc)}
+        return {
+            "patched":         False,
+            "patch_content":   "",
+            "patch_diff":      "",
+            "patch_original":  "",
+            "finding_patches": [],
+            "error":           str(exc),
+        }
 
 
 def merge_node(state: GraphState) -> dict:
     """Merge node — runs after both parallel branches complete.
 
-    Folds the score data (stored in score_json by score_report_node) back into
-    the report dict so callers get a single self-contained report.
+    Folds score data, combined patch data, and per-finding patch data into
+    the report dict so all downstream consumers (Dash UI, PR node) have a
+    single self-contained object.
     """
     _log._logger.info("🔗 merge_node")
-    score_json = state.get("score_json", "")
-    if not score_json:
-        return {}
+    report = dict(state.get("report", {}))
 
-    try:
-        report = dict(state.get("report", {}))
-        report["scoreReport"] = json.loads(score_json)
-        return {"report": report}
-    except Exception as exc:
-        _log._logger.error("merge_node — could not fold score: %s", exc)
-        return {}
+    score_json = state.get("score_json", "")
+    if score_json:
+        try:
+            report["scoreReport"] = json.loads(score_json)
+        except Exception as exc:
+            _log._logger.error("merge_node — could not fold score: %s", exc)
+
+    # Embed patch data into the report for the Dash UI.
+    # Prefer values already embedded by patch_file_node (survive LangGraph fan-in
+    # state merging); fall back to top-level state keys as a secondary source.
+    report["_patchContent"]  = state.get("patch_content", "")  or report.get("_patchContent", "")
+    report["_patchDiff"]     = state.get("patch_diff", "")     or report.get("_patchDiff", "")
+    report["_patchOriginal"] = state.get("patch_original", "") or report.get("_patchOriginal", "")
+    report["_findingPatches"] = (
+        state.get("finding_patches") or report.get("_findingPatches") or []
+    )
+
+    return {"report": report}
 
 
 def create_pr_node(state: GraphState) -> dict:
-    """Node: Crear PR.
+    """Node: Crear PRs.
 
-    Creates a feature branch containing only the patched file, then opens a
-    pull request on GitHub.  Only runs when the analysed file belongs to one
-    of the tracked repos (Aeacosta/LangChain101 or
-    Aeacosta-CenfoTec/CodeSmellExamples).
+    Creates one feature branch + PR per finding when the file belongs to a
+    tracked GitHub repo.  Uses pre-computed per-finding patch content so the
+    PR diff for each finding shows only that finding's changes.
 
-    Writes ONLY `pr_url`.
+    Writes ONLY `pr_urls`.
     """
     file_path = state.get("file_path", "")
     report    = state.get("report", {})
 
-    _log._logger.info("🐙 create_pr_node — file: %s", file_path)
+    # Prefer the list embedded in report by merge_node (_findingPatches), which
+    # is guaranteed to be present regardless of LangGraph fan-in state merging.
+    # Fall back to the raw state key as a secondary source.
+    finding_patches = (
+        report.get("_findingPatches")
+        or state.get("finding_patches")
+        or []
+    )
 
-    pr_url = create_pull_request_sync(report, file_path)
+    _log._logger.info(
+        "🐙 create_pr_node — file: %s  finding_patches: %d",
+        file_path, len(finding_patches),
+    )
 
-    if pr_url and pr_url.startswith("https://github.com"):
-        _log._logger.info("create_pr_node — PR created: %s", pr_url)
-    else:
-        _log._logger.warning("create_pr_node — unexpected response: %s", pr_url)
+    pr_urls = create_pr_per_finding_sync(report, file_path, finding_patches)
 
-    return {"pr_url": pr_url}
+    _log._logger.info(
+        "create_pr_node — %d PR(s) created", len(pr_urls)
+    )
+    for entry in pr_urls:
+        _log._logger.info(
+            "  finding #%s → %s", entry.get("finding_id"), entry.get("url")
+        )
+
+    return {"pr_urls": pr_urls}
 
 
 # ---------------------------------------------------------------------------
@@ -212,19 +328,12 @@ def create_pr_node(state: GraphState) -> dict:
 # ---------------------------------------------------------------------------
 
 def route_json_valid(state: GraphState) -> str:
-    """Conditional edge after validate_json_node.
-
-    Returns 'valid' when the JSON parsed successfully, 'retry' otherwise.
-    """
+    """Conditional edge after validate_json_node."""
     return "valid" if state.get("valid_json") else "retry"
 
 
 def route_create_pr(state: GraphState) -> str:
-    """Conditional edge after merge_node.
-
-    Returns 'create_pr' when the file belongs to a tracked GitHub repo,
-    'skip_pr' otherwise.
-    """
+    """Conditional edge after merge_node."""
     file_path = state.get("file_path", "")
     return "create_pr" if resolve_repo(file_path) is not None else "skip_pr"
 
@@ -245,11 +354,10 @@ def build_graph() -> StateGraph:
     graph.add_node("merge",          merge_node)
     graph.add_node("create_pr",      create_pr_node)
 
-    # Edges — matches the Mermaid flowchart exactly
+    # Edges
     graph.add_edge(START,            "read_file")
     graph.add_edge("read_file",      "validate_json")
 
-    # Conditional: JSON Valido? → retry or proceed
     graph.add_conditional_edges(
         "validate_json",
         route_json_valid,
@@ -264,7 +372,6 @@ def build_graph() -> StateGraph:
     graph.add_edge("score_report",   "merge")
     graph.add_edge("patch_file",     "merge")
 
-    # Conditional: create PR only for tracked repos
     graph.add_conditional_edges(
         "merge",
         route_create_pr,
@@ -286,14 +393,18 @@ compiled_graph = build_graph().compile()
 def run(file_path: str) -> dict:
     """Run the full graph for *file_path* and return the final GraphState."""
     initial_state: GraphState = {
-        "file_path":    file_path,
-        "raw_response": "",
-        "report_json":  "",
-        "report":       {},
-        "score_json":   "",
-        "patched":      False,
-        "valid_json":   False,
-        "error":        "",
-        "pr_url":       "",
+        "file_path":       file_path,
+        "raw_response":    "",
+        "report_json":     "",
+        "report":          {},
+        "score_json":      "",
+        "patched":         False,
+        "patch_content":   "",
+        "patch_diff":      "",
+        "patch_original":  "",
+        "finding_patches": [],
+        "valid_json":      False,
+        "error":           "",
+        "pr_urls":         [],
     }
     return compiled_graph.invoke(initial_state)

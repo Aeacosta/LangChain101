@@ -15,7 +15,7 @@ from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
 from . import GraphAgent
-from Helpers.FilePatcher import preview_patch, apply_fixes
+from Helpers.FilePatcher import apply_fixes, git_apply_patch, preview_patch
 
 # ── File discovery ────────────────────────────────────────────────────────────
 
@@ -94,9 +94,9 @@ app.layout = dbc.Container(
 
         # Hidden stores
         dcc.Store(id="result-store"),
-        dcc.Store(id="pr-url-store"),
+        dcc.Store(id="pr-urls-store"),
 
-        # PR banner — hidden until a PR is created
+        # PR banner — hidden until PR(s) are created
         html.Div(id="pr-banner"),
 
         dbc.Spinner(
@@ -187,7 +187,7 @@ app.layout = dbc.Container(
     Output("report-output",   "children"),
     Output("result-store",    "data"),
     Output("patcher-section", "style"),
-    Output("pr-url-store",    "data"),
+    Output("pr-urls-store",   "data"),
     Input("btn-analyze", "n_clicks"),
     State("file-dropdown", "value"),
     State("file-custom",   "value"),
@@ -209,7 +209,7 @@ def run_analysis(_n_clicks, dropdown_val, custom_val, github_val):
 
     final_state = GraphAgent.run(file_path)
     result  = final_state.get("report", {})
-    pr_url  = final_state.get("pr_url", "")
+    pr_urls = final_state.get("pr_urls", [])
 
     if not result:
         error = final_state.get("error", "unknown error")
@@ -227,21 +227,37 @@ def run_analysis(_n_clicks, dropdown_val, custom_val, github_val):
     has_diffs = any(f.get("diff", "").strip() for f in result.get("findings", []))
     patcher_style = {"display": "block"} if has_diffs else {"display": "none"}
 
-    return _render_report(result), result, patcher_style, pr_url or None
+    return _render_report(result), result, patcher_style, pr_urls or None
 
 
 @app.callback(
     Output("pr-banner", "children"),
-    Input("pr-url-store", "data"),
+    Input("pr-urls-store", "data"),
     prevent_initial_call=True,
 )
-def show_pr_banner(pr_url: str | None):
-    if not pr_url or not pr_url.startswith("https://github.com"):
+def show_pr_banner(pr_urls: list | None):
+    if not pr_urls:
         return None
+
+    items = []
+    for entry in pr_urls:
+        url   = entry.get("url", "")
+        fid   = entry.get("finding_id", "?")
+        smell = entry.get("smell", "")
+        if not url.startswith("https://github.com"):
+            continue
+        items.append(html.Li([
+            html.Strong(f"#{fid} {smell}: "),
+            html.A(url, href=url, target="_blank", rel="noopener noreferrer"),
+        ]))
+
+    if not items:
+        return None
+
     return dbc.Alert(
         [
-            html.Strong("🐙 Pull Request created: "),
-            html.A(pr_url, href=pr_url, target="_blank", rel="noopener noreferrer"),
+            html.Strong(f"🐙 {len(items)} Pull Request(s) created:"),
+            html.Ul(items, className="mb-0 mt-1"),
         ],
         color="success",
         className="mt-2 mb-3",
@@ -260,30 +276,90 @@ def update_patch_views(result: dict):
     if not result:
         return "", "", ""
 
-    pr = preview_patch(result)
-    if pr is None:
-        msg = "Source file not found or unreadable."
-        return msg, msg, dbc.Alert(msg, color="warning")
+    # ── Prefer per-finding patches stored in the report ───────────────────────
+    # Each finding was patched independently against the original, so the union
+    # of their diffs is exactly "what every finding would change."
+    finding_patches = result.get("_findingPatches", [])
+    original        = result.get("_patchOriginal", "")
+    raw_content     = result.get("_patchContent", "")
+    unified_diff    = result.get("_patchDiff", "")
 
-    # Raw tab — plain patched text
-    raw_content = pr.patched
+    if not raw_content:
+        # Fallback: compute from scratch (e.g. when running without the graph).
+        pr = git_apply_patch(result) or preview_patch(result)
+        if pr is None:
+            msg = "Source file not found or unreadable."
+            return msg, msg, dbc.Alert(msg, color="warning")
+        raw_content  = pr.patched
+        unified_diff = pr.unified_diff
+        original     = pr.original
+        finding_patches = []
 
-    # Diff tab — coloured unified diff
-    diff_lines = []
-    for line in pr.unified_diff.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            diff_lines.append(html.Span(line + "\n", style={"color": "#16a34a"}))
-        elif line.startswith("-") and not line.startswith("---"):
-            diff_lines.append(html.Span(line + "\n", style={"color": "#dc2626"}))
-        elif line.startswith("@@"):
-            diff_lines.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
-        else:
-            diff_lines.append(html.Span(line + "\n", style={"color": "#57606a"}))
+    if not original:
+        original = raw_content
 
-    diff_content = diff_lines or "No changes produced."
+    # ── Diff tab — show each finding's diff in its own labelled block ─────────
+    diff_children: list = []
 
-    # Preview tab — side-by-side original vs patched
-    preview_content = _render_side_by_side(pr.original, pr.patched, pr.errors)
+    if finding_patches:
+        # One coloured block per finding, labelled with its id and smell.
+        for fp in finding_patches:
+            fid   = fp.get("finding_id", "?")
+            smell = fp.get("smell", "")
+            fdiff = fp.get("unified_diff", "")
+            if not fdiff.strip():
+                continue
+
+            block_lines = []
+            for line in fdiff.splitlines():
+                if line.startswith("+") and not line.startswith("+++"):
+                    block_lines.append(html.Span(line + "\n", style={"color": "#16a34a"}))
+                elif line.startswith("-") and not line.startswith("---"):
+                    block_lines.append(html.Span(line + "\n", style={"color": "#dc2626"}))
+                elif line.startswith("@@"):
+                    block_lines.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
+                else:
+                    block_lines.append(html.Span(line + "\n", style={"color": "#57606a"}))
+
+            diff_children.append(html.Div([
+                html.Div(
+                    f"▸ Finding #{fid} — {smell}",
+                    style={
+                        "fontWeight": "600",
+                        "fontSize":   "0.75rem",
+                        "color":      "#3b82d4",
+                        "marginTop":  "10px",
+                        "marginBottom": "2px",
+                    },
+                ),
+                html.Pre(
+                    block_lines,
+                    style={
+                        "fontSize":        "0.78rem",
+                        "backgroundColor": "#f7f8fa",
+                        "padding":         "8px",
+                        "borderRadius":    "4px",
+                        "margin":          "0",
+                    },
+                ),
+            ]))
+    else:
+        # Fallback: render the combined unified diff as a single block.
+        for line in unified_diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                diff_children.append(html.Span(line + "\n", style={"color": "#16a34a"}))
+            elif line.startswith("-") and not line.startswith("---"):
+                diff_children.append(html.Span(line + "\n", style={"color": "#dc2626"}))
+            elif line.startswith("@@"):
+                diff_children.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
+            else:
+                diff_children.append(html.Span(line + "\n", style={"color": "#57606a"}))
+
+    diff_content = html.Div(diff_children) if diff_children else "No changes produced."
+
+    # Preview tab — side-by-side original vs combined patched
+    all_errors = [e for fp in finding_patches for e in fp.get("errors", [])]
+    preview_content = _render_side_by_side(original, raw_content, all_errors)
 
     return raw_content, diff_content, preview_content
 

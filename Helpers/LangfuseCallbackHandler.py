@@ -6,9 +6,13 @@ Provides a single ``get_callback()`` factory that returns a
 or ``None`` when the Langfuse keys are not set (so callers can treat it
 as an optional extra callback without special-casing).
 
-Supports langfuse ≥ 2.x (v4 API): credentials come from the environment
-variables LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, and LANGFUSE_HOST
-(or LANGFUSE_BASE_URL as an alias used in this project's .env).
+Supports langfuse v4: credentials come from the environment variables
+LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, and LANGFUSE_HOST (or
+LANGFUSE_BASE_URL as an alias used in this project's .env).
+
+In v4, the CallbackHandler resolves its backing client through a
+singleton registry keyed by public_key.  A Langfuse() instance must be
+registered first; get_callback() handles this automatically.
 
 Usage
 -----
@@ -80,19 +84,53 @@ def get_callback(
         return None
 
     try:
+        from langfuse import Langfuse                   # type: ignore
         from langfuse.langchain import CallbackHandler  # type: ignore
         from langfuse.types import TraceContext         # type: ignore
 
-        # Ensure the v4 client env vars are set before the client is created.
-        os.environ.setdefault("LANGFUSE_HOST", host)
-        os.environ.setdefault("LANGFUSE_SECRET_KEY", secret_key)
-        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", public_key)
+        # Langfuse v4 uses a singleton registry keyed by public_key.
+        # The CallbackHandler looks up that registry via get_client(); if no
+        # Langfuse() instance has been registered yet it returns a disabled
+        # client and emits "No Langfuse client with public key … has been
+        # initialized. Skipping tracing for decorated function."
+        # Explicitly constructing Langfuse() registers the client so that
+        # subsequent CallbackHandler calls resolve it correctly.
+        Langfuse(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host,
+        )
 
         # TraceContext only accepts trace_id (32-char hex) + optional parent_span_id.
         # Derive a stable hex trace_id from session_id when provided.
         trace_context: Optional[TraceContext] = None
         if session_id is not None:
             trace_context = TraceContext(trace_id=_to_trace_id(session_id))
+
+        # In v4 the trace name is not a constructor argument — it is read from
+        # metadata["langfuse_trace_name"] on the first root chain call.  When a
+        # trace_name is requested we return a thin subclass that injects that key
+        # automatically so callers don't need to touch their invoke() configs.
+        if trace_name is not None:
+            _name = trace_name  # capture for closure
+
+            class _NamedCallbackHandler(CallbackHandler):  # type: ignore[misc]
+                def on_chain_start(self, serialized, inputs, *, run_id, parent_run_id=None, metadata=None, **kwargs):  # type: ignore[override]
+                    if parent_run_id is None:
+                        metadata = dict(metadata or {})
+                        metadata.setdefault("langfuse_trace_name", _name)
+                    return super().on_chain_start(
+                        serialized, inputs,
+                        run_id=run_id,
+                        parent_run_id=parent_run_id,
+                        metadata=metadata,
+                        **kwargs,
+                    )
+
+            return _NamedCallbackHandler(
+                public_key=public_key,
+                trace_context=trace_context,
+            )
 
         return CallbackHandler(
             public_key=public_key,

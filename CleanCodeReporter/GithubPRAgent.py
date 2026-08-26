@@ -1,15 +1,21 @@
-"""GitHub PR creator — uses the GitHub MCP server via langchain-mcp-adapters.
+"""GitHub Issue / PR creator — uses the GitHub MCP server via langchain-mcp-adapters.
 
-Workflow
---------
+PR Workflow (legacy — disabled by default due to instability)
+-------------------------------------------------------------
 1. Take the combined patched file content already computed by patch_file_node
    (stored in report["_patchContent"]) — or read it from disk as a fallback.
 2. Create a branch  ``codesmell/<stem>-<timestamp>``  off ``main``.
 3. Push the patched file to that branch.
 4. Open a pull request from that branch into ``main``.
 
+Issue Workflow (preferred)
+--------------------------
+For each file analysed, open **one** GitHub Issue that lists all findings with
+their diffs.  No branch, no direct code push — the changes are proposed as a
+ticket so a human can review them before merging.
+
 Returns a list with one result dict:
-    [{"finding_id": "all", "smell": "combined", "branch": "...", "url": "https://..."}]
+    [{"finding_id": "all", "smell": "combined", "issue_number": 42, "url": "https://..."}]
 
 Supported target repositories
 ------------------------------
@@ -21,6 +27,10 @@ or ``None`` when the file doesn't belong to either repo.
 
 Public API
 ----------
+    results = await create_issue_per_finding(report, file_path)
+    results =       create_issue_per_finding_sync(report, file_path)
+
+    # Legacy PR API (kept for backwards compatibility)
     results = await create_pr_per_finding(report, file_path, finding_patches)
     results =       create_pr_per_finding_sync(report, file_path, finding_patches)
 """
@@ -87,8 +97,57 @@ def resolve_repo(file_path: str) -> tuple[str, str, str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# PR body builder (all findings combined)
+# Body builders
 # ---------------------------------------------------------------------------
+
+def _build_issue_body(report: dict, file_path: str) -> tuple[str, str]:
+    """Return ``(title, body)`` for a GitHub Issue listing all findings."""
+    file_name = report.get("fileName") or os.path.basename(file_path)
+    findings  = report.get("findings", [])
+    score     = report.get("scoreReport") or {}
+
+    n_findings = len([f for f in findings if (f.get("diff") or "").strip()])
+    title = f"[CodeSmell] {n_findings} fix(es) requested in {file_name}"
+
+    lines: list[str] = [
+        f"## Code Smell Fixes Requested — `{file_name}`",
+        "",
+        f"The Code Smell Analyzer detected **{n_findings} issue(s)** in `{file_name}`.",
+        "The proposed fixes are listed below for human review before any code change is made.",
+        "",
+        "### Findings",
+        "",
+    ]
+
+    for f in sorted(findings, key=lambda x: x.get("id", 0)):
+        diff = (f.get("diff") or "").strip()
+        if not diff:
+            continue
+        fid      = f.get("id", "?")
+        smell    = f.get("smell", "unknown")
+        severity = f.get("severity", "Low")
+        desc     = f.get("description", "")
+        rec      = f.get("recommendation", "")
+        lines.append(f"#### #{fid} — {smell} `[{severity}]`")
+        if desc:
+            lines += ["", desc]
+        if rec:
+            lines += ["", f"**Recommendation:** {rec}"]
+        lines += ["", "```diff", diff, "```", ""]
+
+    if score:
+        grade = score.get("grade", "?")
+        pts   = score.get("score", "?")
+        lines += [f"**Overall score:** {pts} / 100  |  **Grade:** {grade}", ""]
+
+    lines += [
+        "---",
+        "*Generated automatically by the Code Smell Analyzer (LangChain101).*",
+        "*No code was pushed — please review and apply changes manually or via a PR.*",
+    ]
+
+    return title, "\n".join(lines)
+
 
 def _build_pr_body(report: dict, file_path: str) -> tuple[str, str]:
     """Return ``(title, body)`` for the combined-findings PR."""
@@ -138,8 +197,100 @@ def _build_pr_body(report: dict, file_path: str) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Core async function
+# Core async functions
 # ---------------------------------------------------------------------------
+
+async def create_issue_per_finding(
+    report: dict,
+    file_path: str,
+) -> list[dict]:
+    """Open one GitHub Issue listing all findings for the file.
+
+    No branch is created and no code is pushed.  The issue body contains
+    every finding's description, recommendation, and proposed unified diff
+    so a developer can review and apply the changes manually.
+
+    Parameters
+    ----------
+    report    : parsed CodeSmellReport dict (with scoreReport already merged).
+    file_path : local or GitHub path of the analysed file.
+
+    Returns
+    -------
+    list[dict]
+        One entry on success:
+        ``{"finding_id": "all", "smell": "combined", "issue_number": int, "url": str}``.
+    """
+    resolved = resolve_repo(file_path)
+    if resolved is None:
+        _log._logger.info("create_issue — no matching repo for: %s", file_path)
+        return []
+
+    owner, repo, _base_branch, _repo_file_path = resolved
+
+    github_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    if not github_token:
+        _log._logger.error("create_issue — GITHUB_PERSONAL_ACCESS_TOKEN not set")
+        return []
+
+    findings_with_diff = [f for f in report.get("findings", []) if (f.get("diff") or "").strip()]
+    if not findings_with_diff:
+        _log._logger.info("create_issue — no findings with diffs; nothing to do")
+        return []
+
+    title, body = _build_issue_body(report, file_path)
+
+    _log._logger.info("🐙 create_issue — opening issue in %s/%s", owner, repo)
+
+    client = MultiServerMCPClient(
+        {
+            "github": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-github"],
+                "transport": "stdio",
+                "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": github_token},
+            }
+        }
+    )
+    tools    = await client.get_tools()
+    tool_map = {t.name: t for t in tools}
+    _log._logger.debug("github_issue_agent — tools: %s", list(tool_map.keys()))
+
+    def _get_tool(name: str):
+        if name not in tool_map:
+            raise RuntimeError(
+                f"GitHub MCP tool '{name}' not found. Available: {list(tool_map.keys())}"
+            )
+        return tool_map[name]
+
+    try:
+        issue_resp = await _get_tool("create_issue").ainvoke({
+            "owner": owner,
+            "repo":  repo,
+            "title": title,
+            "body":  body,
+        })
+
+        if isinstance(issue_resp, dict):
+            issue_url    = issue_resp.get("html_url", "")
+            issue_number = issue_resp.get("number", 0)
+        else:
+            m = re.search(r"https://github\.com/[^\s>\"']+/issues/(\d+)", str(issue_resp))
+            issue_url    = m.group(0) if m else str(issue_resp)
+            issue_number = int(m.group(1)) if m else 0
+
+        _log._logger.info("Issue created: %s", issue_url)
+        return [{
+            "finding_id":   "all",
+            "smell":        "combined",
+            "issue_number": issue_number,
+            "url":          issue_url,
+        }]
+
+    except Exception as exc:  # noqa: BLE001
+        _log._logger.error("create_issue — failed: %s", exc)
+        return []
+
 
 async def create_pr_per_finding(
     report: dict,
@@ -276,8 +427,20 @@ async def create_pr_per_finding(
 
 
 # ---------------------------------------------------------------------------
-# Sync wrapper
+# Sync wrappers
 # ---------------------------------------------------------------------------
+
+def create_issue_per_finding_sync(
+    report: dict,
+    file_path: str,
+) -> list[dict]:
+    """Synchronous wrapper around :func:`create_issue_per_finding`."""
+    try:
+        return asyncio.run(create_issue_per_finding(report, file_path))
+    except Exception as exc:
+        _log._logger.error("create_issue_per_finding_sync — error: %s", exc)
+        return []
+
 
 def create_pr_per_finding_sync(
     report: dict,

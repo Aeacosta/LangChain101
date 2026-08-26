@@ -8,7 +8,7 @@ Flow (mirrors the Mermaid diagram):
                   ├─ No ──► Leer Archivos   (retry loop)
                   └─ Sí ──► Extraer Reporte
                               ├──► Calificar Reporte  ─┐
-                              └──► Escribir Archivo   ─┴─► Merge ──► Crear PRs? ──► Fin
+                              └──► Escribir Archivo   ─┴─► Merge ──► Crear Issue? ──► Fin
 
 Nodes
 -----
@@ -22,8 +22,9 @@ patch_file_node     — applies unified diffs and writes the corrected file.
                       per-finding patch list; writes disjoint keys only.
 merge_node          — recombines score_json + patch data into report after
                       the parallel branches.
-create_pr_node      — creates one GitHub branch + PR per finding when the
-                      file belongs to a tracked repo.
+create_issue_node   — opens one GitHub Issue listing all findings when the
+                      file belongs to a tracked repo.  No branch is created;
+                      a human must review and apply the proposed diffs.
 
 LangGraph rule: nodes that run in parallel (fan-out from the same parent) must
 write to **disjoint** state keys.  score_report_node owns `score_json`;
@@ -40,7 +41,7 @@ import os
 from langgraph.graph import END, START, StateGraph
 
 from .agent_setup import agent as _agent
-from .GithubPRAgent import create_pr_per_finding_sync, resolve_repo
+from .GithubPRAgent import create_issue_per_finding_sync, resolve_repo
 from Helpers.FilePatcher import (
     apply_fixes,
     git_apply_patch,
@@ -285,43 +286,30 @@ def merge_node(state: GraphState) -> dict:
     return {"report": report}
 
 
-def create_pr_node(state: GraphState) -> dict:
-    """Node: Crear PRs.
+def create_issue_node(state: GraphState) -> dict:
+    """Node: Crear Issue.
 
-    Creates one feature branch + PR per finding when the file belongs to a
-    tracked GitHub repo.  Uses pre-computed per-finding patch content so the
-    PR diff for each finding shows only that finding's changes.
+    Opens one GitHub Issue listing all findings when the file belongs to a
+    tracked repo.  No branch is created and no code is pushed — the proposed
+    diffs are embedded in the issue body for human review.
 
-    Writes ONLY `pr_urls`.
+    Writes ONLY `pr_urls` (reusing the existing state key so the Dash UI
+    and any downstream consumers remain unchanged).
     """
     file_path = state.get("file_path", "")
     report    = state.get("report", {})
 
-    # Prefer the list embedded in report by merge_node (_findingPatches), which
-    # is guaranteed to be present regardless of LangGraph fan-in state merging.
-    # Fall back to the raw state key as a secondary source.
-    finding_patches = (
-        report.get("_findingPatches")
-        or state.get("finding_patches")
-        or []
-    )
+    _log._logger.info("🐙 create_issue_node — file: %s", file_path)
 
-    _log._logger.info(
-        "🐙 create_pr_node — file: %s  finding_patches: %d",
-        file_path, len(finding_patches),
-    )
+    issue_urls = create_issue_per_finding_sync(report, file_path)
 
-    pr_urls = create_pr_per_finding_sync(report, file_path, finding_patches)
-
-    _log._logger.info(
-        "create_pr_node — %d PR(s) created", len(pr_urls)
-    )
-    for entry in pr_urls:
+    _log._logger.info("create_issue_node — %d issue(s) created", len(issue_urls))
+    for entry in issue_urls:
         _log._logger.info(
-            "  finding #%s → %s", entry.get("finding_id"), entry.get("url")
+            "  issue #%s → %s", entry.get("issue_number"), entry.get("url")
         )
 
-    return {"pr_urls": pr_urls}
+    return {"pr_urls": issue_urls}
 
 
 # ---------------------------------------------------------------------------
@@ -333,10 +321,10 @@ def route_json_valid(state: GraphState) -> str:
     return "valid" if state.get("valid_json") else "retry"
 
 
-def route_create_pr(state: GraphState) -> str:
+def route_create_issue(state: GraphState) -> str:
     """Conditional edge after merge_node."""
     file_path = state.get("file_path", "")
-    return "create_pr" if resolve_repo(file_path) is not None else "skip_pr"
+    return "create_issue" if resolve_repo(file_path) is not None else "skip_issue"
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +341,7 @@ def build_graph() -> StateGraph:
     graph.add_node("score_report",   score_report_node)
     graph.add_node("patch_file",     patch_file_node)
     graph.add_node("merge",          merge_node)
-    graph.add_node("create_pr",      create_pr_node)
+    graph.add_node("create_issue",   create_issue_node)
 
     # Edges
     graph.add_edge(START,            "read_file")
@@ -375,10 +363,10 @@ def build_graph() -> StateGraph:
 
     graph.add_conditional_edges(
         "merge",
-        route_create_pr,
-        {"create_pr": "create_pr", "skip_pr": END},
+        route_create_issue,
+        {"create_issue": "create_issue", "skip_issue": END},
     )
-    graph.add_edge("create_pr", END)
+    graph.add_edge("create_issue", END)
 
     return graph
 

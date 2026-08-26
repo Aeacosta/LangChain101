@@ -4,7 +4,7 @@ Este repositorio contiene dos sistemas agénticos construidos sobre **LangGraph 
 
 | Sistema | Carpeta | Descripción |
 |---|---|---|
-| **CleanCodeReviewer** | `CleanCodeReporter/` | Analiza archivos C# en busca de code smells, los califica y genera PRs correctivas |
+| **CleanCodeReviewer** | `CleanCodeReporter/` | Analiza archivos C# en busca de code smells, los califica y abre Issues en GitHub solicitando las correcciones |
 | **XTP Analyser** | `XTPAnalyser/` | Compara programas XTP, analiza matrices Bin2Bin y vincula discrepancias a PRs de GitHub |
 
 ---
@@ -44,7 +44,7 @@ LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_HOST=https://cloud.langfuse.com
 
-# GitHub (para crear PRs y consultar repositorios XTP)
+# GitHub (para abrir Issues de code-smell y consultar repositorios XTP)
 GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
 ```
 
@@ -65,7 +65,7 @@ flowchart TD
     score_report["<b>score_report</b><br/><small>ScorerAgent — ChatOpenAI</small><br/><small>→ score_json</small>"]
     patch_file["<b>patch_file</b><br/><small>FilePatcher</small><br/><small>→ patched · patch_diff · finding_patches</small>"]
     merge["<b>merge</b><br/><small>fusiona score_json + patch_data → report</small>"]
-    create_pr["<b>create_pr</b><br/><small>GithubPRAgent — una rama + PR por hallazgo</small><br/><small>→ pr_urls</small>"]
+    create_issue["<b>create_issue</b><br/><small>GithubPRAgent — un Issue con todos los hallazgos</small><br/><small>→ pr_urls</small>"]
     END([FIN])
 
     START --> read_file
@@ -76,9 +76,9 @@ flowchart TD
     extract_report --> patch_file
     score_report --> merge
     patch_file --> merge
-    merge -- repo detectado --> create_pr
+    merge -- repo detectado --> create_issue
     merge -- sin repo --> END
-    create_pr --> END
+    create_issue --> END
 ```
 
 **Archivos clave:**
@@ -91,7 +91,7 @@ flowchart TD
 | [`Helpers/JsonFormatterAgent.py`](Helpers/JsonFormatterAgent.py) | LLM de un solo turno que convierte texto libre a JSON schema |
 | [`Helpers/ScorerAgent.py`](Helpers/ScorerAgent.py) | LLM de un solo turno que calcula nota y justificación |
 | [`Helpers/FilePatcher.py`](Helpers/FilePatcher.py) | Aplica unified diffs al archivo fuente |
-| [`CleanCodeReporter/GithubPRAgent.py`](CleanCodeReporter/GithubPRAgent.py) | Crea ramas y PRs en GitHub por hallazgo |
+| [`CleanCodeReporter/GithubPRAgent.py`](CleanCodeReporter/GithubPRAgent.py) | Abre un Issue en GitHub con todos los hallazgos y sus diffs propuestos |
 
 #### Inyección de Langfuse
 
@@ -249,7 +249,7 @@ prueba_langchain/
 │   ├── GraphAgent.py          # Grafo LangGraph — 7 nodos
 │   ├── Agent.py               # Clase Agent — ReAct loop
 │   ├── agent_setup.py         # Herramientas del agente + prompt
-│   ├── GithubPRAgent.py       # Creación de PRs en GitHub
+│   ├── GithubPRAgent.py       # Apertura de Issues en GitHub con hallazgos
 │   ├── Rag.py                 # RagCore — PDFs de buenas prácticas
 │   └── dash_app.py            # UI Dash
 ├── XTPAnalyser/

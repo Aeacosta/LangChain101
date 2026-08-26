@@ -43,7 +43,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context, async_trace_name_context
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
 
@@ -234,9 +234,9 @@ class XTPPRDiscoveryAgent:
             )
             return []
 
-        _cb = get_callback(trace_name="XTPPRDiscoveryAgent")
+        _cb = get_callback()
         _cbs = [_cb] if _cb else []
-        model = _build_model(callbacks=_cbs)
+        model = _build_model(callbacks=[])
         log.debug("[Discovery] LLM: %s @ %s", os.getenv("LLM_MODEL"), os.getenv("LLM_API_BASE"))
 
         agent = create_agent(
@@ -257,10 +257,11 @@ class XTPPRDiscoveryAgent:
 
         raw = ""
         try:
-            result = await agent.ainvoke(
-                {"messages": [{"role": "user", "content": user_message}]},
-                config={"callbacks": _cbs},
-            )
+            async with async_trace_name_context("XTPPRDiscoveryAgent"):
+                result = await agent.ainvoke(
+                    {"messages": [{"role": "user", "content": user_message}]},
+                    config={"callbacks": _cbs},
+                )
 
             # ── log every message in the agent conversation ───────────────
             messages = result.get("messages", [])
@@ -355,9 +356,7 @@ class XTPPRMatcherAgent:
 
     def __init__(self, logger: AgentLogger | None = None) -> None:
         self._log = logger or AgentLogger(name="xtp_pr_matcher", level="DEBUG")
-        _cb = get_callback(trace_name="XTPPRMatcherAgent")
-        self._callbacks = [_cb] if _cb else []
-        model = _build_model(callbacks=self._callbacks)
+        model = _build_model(callbacks=[])
         self._agent = create_agent(
             model=model,
             tools=[],
@@ -401,10 +400,13 @@ class XTPPRMatcherAgent:
 
         raw_answer = ""
         try:
-            result = await self._agent.ainvoke(
-                {"messages": [{"role": "user", "content": user_message}]},
-                config={"callbacks": self._callbacks},
-            )
+            _cb = get_callback()
+            _callbacks = [_cb] if _cb else []
+            async with async_trace_name_context("XTPPRMatcherAgent"):
+                result = await self._agent.ainvoke(
+                    {"messages": [{"role": "user", "content": user_message}]},
+                    config={"callbacks": _callbacks},
+                )
             raw_answer = result["messages"][-1].content.strip()
             log.debug("[Matcher] Raw answer: %s", raw_answer[:400])
 

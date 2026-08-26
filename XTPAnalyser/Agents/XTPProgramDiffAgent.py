@@ -13,7 +13,7 @@ from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from RAG.xtp_rag import XTPRagCore
 
 from dotenv import load_dotenv
@@ -94,15 +94,11 @@ class XTPProgramDiffAgent:
                 for r in results
             )
 
-        _cb = get_callback(trace_name="XTPProgramDiffAgent")
-        self._callbacks = [_cb] if _cb else []
-
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.1,
-            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -144,9 +140,12 @@ class XTPProgramDiffAgent:
     def invoke(self, message: str) -> str:
         """Run the expert agent with *message* and return the answer string."""
         self._log._logger.debug("[XTPProgramDiffAgent] Question: %s", message)
-        result = self._agent.invoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config={"callbacks": self._callbacks},
-        )
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
+        with trace_name_context("XTPProgramDiffAgent"):
+            result = self._agent.invoke(
+                {"messages": [{"role": "user", "content": message}]},
+                config={"callbacks": _callbacks},
+            )
         return result["messages"][-1].content
 

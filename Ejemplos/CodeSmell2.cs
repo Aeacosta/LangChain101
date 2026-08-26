@@ -6,12 +6,11 @@ public class Program
     {
         var calculator = new ShippingCalculator();
 
-    private const int LargeOrderAmount = 120;
-    private const int MediumOrderAmount = 75;
-    private const int SmallOrderAmount = 30;
 
-        Console.WriteLine(calculator.CalculateShipping(LargeOrderAmount));  // 0
-        Console.WriteLine(calculator.CalculateShipping(MediumOrderAmount)); // 5
-        Console.WriteLine(calculator.CalculateShipping(SmallOrderAmount));  // 12
+// En ShippingCalculator:
+public const int LargeOrderAmount = 120;
+public const int MediumOrderAmount = 75;
+        // El Main solo arranca la aplicación
+        // Los valores de prueba deben ir en un proyecto de pruebas unitarias
     }
-}
+

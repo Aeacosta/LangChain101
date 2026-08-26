@@ -48,7 +48,7 @@ from Helpers.FilePatcher import (
     preview_patch_single_finding,
 )
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from Helpers.Logger import AgentLogger
 from Helpers.ScorerAgent import ScorerAgent
 from Structures.CodeSmellReport import GraphState
@@ -408,9 +408,7 @@ def run(file_path: str) -> dict:
         "error":           "",
         "pr_urls":         [],
     }
-    _cb = get_callback(
-        session_id=file_path,
-        trace_name="CleanCodeReviewer",
-    )
+    _cb = get_callback(session_id=file_path)
     _config = {"callbacks": [_cb]} if _cb else {}
-    return compiled_graph.invoke(initial_state, config=_config)
+    with trace_name_context("CleanCodeReviewer"):
+        return compiled_graph.invoke(initial_state, config=_config)

@@ -35,7 +35,7 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from RAG.xtp_rag import XTPRagCore
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
@@ -154,15 +154,11 @@ class XTPMismatchJustificationAgent:
                 for r in results
             )
 
-        _cb = get_callback(trace_name="XTPMismatchJustificationAgent")
-        self._callbacks = [_cb] if _cb else []
-
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.1,
-            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -228,10 +224,13 @@ class XTPMismatchJustificationAgent:
             "then output only the justification table (or the WARNING block)."
         )
 
-        result = self._agent.invoke(
-            {"messages": [{"role": "user", "content": user_message}]},
-            config={"callbacks": self._callbacks},
-        )
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
+        with trace_name_context("XTPMismatchJustificationAgent"):
+            result = self._agent.invoke(
+                {"messages": [{"role": "user", "content": user_message}]},
+                config={"callbacks": _callbacks},
+            )
         answer = result["messages"][-1].content
         self._log._logger.info("[XTPMismatchJustificationAgent] Done.")
         return answer

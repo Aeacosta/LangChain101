@@ -5,7 +5,7 @@ from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
 from Helpers.JsonUtils import fix_json_string_control_chars
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 
 _JSON_FORMATTER_PROMPT = """You are a JSON converter.
 
@@ -67,13 +67,10 @@ class JsonFormatterAgent:
 
     def __init__(self, logger: AgentLogger) -> None:
         self._log = logger
-        _cb = get_callback(trace_name="JsonFormatterAgent")
-        _callbacks = [_cb] if _cb else []
         self._model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
-            callbacks=_callbacks,
         )
 
     def format(self, raw_analysis: str) -> str:
@@ -81,11 +78,14 @@ class JsonFormatterAgent:
         self._log._logger.debug(
             "JsonFormatterAgent: reformatting %d chars", len(raw_analysis)
         )
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
         messages = [
             {"role": "system", "content": _JSON_FORMATTER_PROMPT},
             {"role": "user", "content": raw_analysis},
         ]
-        response = self._model.invoke(messages)
+        with trace_name_context("JsonFormatterAgent"):
+            response = self._model.invoke(messages, config={"callbacks": _callbacks})
         answer = response.content.strip()
 
         if answer.lower().startswith("assistant"):

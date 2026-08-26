@@ -25,7 +25,7 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 
 from Helpers.Logger import AgentLogger
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from RAG.xtp_rag import XTPRagCore
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
@@ -139,15 +139,11 @@ class XTPBin2BinMatrixAgent:
             Call this as the starting point for any matrix analysis."""
             return self._matrix_context or "No matrix loaded yet."
 
-        _cb = get_callback(trace_name="XTPBin2BinMatrixAgent")
-        self._callbacks = [_cb] if _cb else []
-
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
             temperature=0.1,
-            callbacks=self._callbacks,
         )
 
         self._agent = create_agent(
@@ -266,10 +262,13 @@ class XTPBin2BinMatrixAgent:
         else:
             full_message = message
 
-        result = self._agent.invoke(
-            {"messages": [{"role": "user", "content": full_message}]},
-            config={"callbacks": self._callbacks},
-        )
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
+        with trace_name_context("XTPBin2BinMatrixAgent"):
+            result = self._agent.invoke(
+                {"messages": [{"role": "user", "content": full_message}]},
+                config={"callbacks": _callbacks},
+            )
         return result["messages"][-1].content
 
     def analyse(self, csv_path: str) -> str:

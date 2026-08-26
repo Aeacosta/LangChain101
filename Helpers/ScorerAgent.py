@@ -27,7 +27,7 @@ from langchain_openai import ChatOpenAI
 
 from Helpers.Logger import AgentLogger
 from Helpers.JsonUtils import fix_json_string_control_chars
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 
 _SCORER_SYSTEM_PROMPT = """You are a code quality scoring engine.
 
@@ -99,13 +99,10 @@ class ScorerAgent:
 
     def __init__(self, logger: AgentLogger) -> None:
         self._log = logger
-        _cb = get_callback(trace_name="ScorerAgent")
-        _callbacks = [_cb] if _cb else []
         self._model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
-            callbacks=_callbacks,
         )
 
     def score(self, report: dict) -> str:
@@ -117,12 +114,15 @@ class ScorerAgent:
             "ScorerAgent: scoring %d findings", len(payload.get("findings", []))
         )
 
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
         messages = [
             {"role": "system", "content": _SCORER_SYSTEM_PROMPT},
             {"role": "user",   "content": json.dumps(payload)},
         ]
 
-        response = self._model.invoke(messages)
+        with trace_name_context("ScorerAgent"):
+            response = self._model.invoke(messages, config={"callbacks": _callbacks})
         answer = response.content.strip()
 
         if answer.lower().startswith("assistant"):

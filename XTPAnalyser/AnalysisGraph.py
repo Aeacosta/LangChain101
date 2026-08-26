@@ -28,7 +28,7 @@ from typing import TypedDict
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from Helpers.Logger import AgentLogger
 
 load_dotenv(dotenv_path=".env" if os.path.exists(".env") else ".env.example")
@@ -239,18 +239,18 @@ def build_analysis_graph(logger: AgentLogger | None = None):
 
     compiled = g.compile()
 
-    # Wrap invoke to automatically attach a Langfuse callback.
+    # Wrap invoke to automatically attach a Langfuse callback and set trace name.
     _original_invoke = compiled.invoke
 
     def _invoke_with_langfuse(input, config=None, **kwargs):  # noqa: A002
         _cb = get_callback(
             session_id=f"{input.get('sha_a','')[:8]}..{input.get('sha_b','')[:8]}",
-            trace_name="XTPAnalyser",
         )
         if _cb:
             config = config or {}
             config.setdefault("callbacks", []).append(_cb)
-        return _original_invoke(input, config=config, **kwargs)
+        with trace_name_context("XTPAnalyser"):
+            return _original_invoke(input, config=config, **kwargs)
 
     compiled.invoke = _invoke_with_langfuse  # type: ignore[method-assign]
     return compiled

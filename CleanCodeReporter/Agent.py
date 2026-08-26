@@ -10,7 +10,7 @@ from . import Rag
 from Helpers.Logger import AgentLogger
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
 from Helpers.ScorerAgent import ScorerAgent
-from Helpers.LangfuseCallbackHandler import get_callback
+from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from Structures.CodeSmellReport import CodeSmellReport
 
 # Load .env if it exists, otherwise fall back to .env.example
@@ -21,16 +21,11 @@ class Agent:
 
     def __init__(self, prompt: str, tools, logger: AgentLogger | None = None):
         self._log = logger or AgentLogger(name="agente")
-        api_key = os.getenv("LLM_API_KEY")
-
-        _cb = get_callback(trace_name="CleanCodeReviewer")
-        self._callbacks = [_cb] if _cb else []
 
         model = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
-            openai_api_key=api_key,
+            openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base=os.getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
-            callbacks=self._callbacks,
         )
 
         self._formatter = JsonFormatterAgent(self._log)
@@ -45,26 +40,29 @@ class Agent:
 
     def call_agent(self, message: str):
         self._log.inicio(message, [])
-        result = self.agent.invoke(
-            {"messages": [
-                {"role": "user", "content": message},
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert C# software engineer and code-quality reviewer.\n\n"
-                        "Analyze the provided C# source file and identify meaningful code smells,\n"
-                        "SOLID violations, maintainability problems, and opportunities for refactoring.\n\n"
-                        "Be conservative. Do not report theoretical or insignificant issues.\n"
-                        "Do not invent line numbers, APIs, classes, or behavior.\n\n"
-                        "For every finding provide:\n"
-                        "- code smell\n- severity\n- location\n- explanation\n"
-                        "- impact\n- recommendation\n- unified diff\n\n"
-                        "The response MUST conform to the provided JSON schema."
-                    ),
-                },
-            ]},
-            config={"callbacks": self._callbacks},
-        )
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
+        with trace_name_context("CleanCodeReviewer"):
+            result = self.agent.invoke(
+                {"messages": [
+                    {"role": "user", "content": message},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an expert C# software engineer and code-quality reviewer.\n\n"
+                            "Analyze the provided C# source file and identify meaningful code smells,\n"
+                            "SOLID violations, maintainability problems, and opportunities for refactoring.\n\n"
+                            "Be conservative. Do not report theoretical or insignificant issues.\n"
+                            "Do not invent line numbers, APIs, classes, or behavior.\n\n"
+                            "For every finding provide:\n"
+                            "- code smell\n- severity\n- location\n- explanation\n"
+                            "- impact\n- recommendation\n- unified diff\n\n"
+                            "The response MUST conform to the provided JSON schema."
+                        ),
+                    },
+                ]},
+                config={"callbacks": _callbacks},
+            )
         prompt_response = result["messages"][-1].content
 
         # Pass the raw analysis through the formatter agent to get clean JSON.
@@ -114,19 +112,22 @@ class Agent:
             ]
         }
 
+        _cb = get_callback()
+        _callbacks = [_cb] if _cb else []
         collected: list[str] = []
         stream_config = {
             "configurable": {"streaming": True},
-            "callbacks": self._callbacks,
+            "callbacks": _callbacks,
         }
-        for event in self.agent.stream(input_payload, stream_mode="messages", config=stream_config):
-            # stream_mode="messages" yields (message_chunk, metadata) tuples.
-            chunk, _meta = event if isinstance(event, tuple) else (event, {})
-            token = getattr(chunk, "content", "") or ""
-            if token:
-                collected.append(token)
-                self._log.stream_token(token)
-                yield token
+        with trace_name_context("CleanCodeReviewer"):
+            for event in self.agent.stream(input_payload, stream_mode="messages", config=stream_config):
+                # stream_mode="messages" yields (message_chunk, metadata) tuples.
+                chunk, _meta = event if isinstance(event, tuple) else (event, {})
+                token = getattr(chunk, "content", "") or ""
+                if token:
+                    collected.append(token)
+                    self._log.stream_token(token)
+                    yield token
 
         # Re-assemble and pass through the formatter agent to get clean JSON.
         prompt_response = "".join(collected)

@@ -12,10 +12,6 @@ public class BankAccount
     }
 }
 
-public class BankManager
-{
-}
-
 public class Program
 {
     public static void Main()
@@ -29,19 +25,8 @@ public class Program
 
         var manager = new BankManager();
 
-        account.CanWithdraw(120);
-        account.CanWithdraw(180);
+        bool canWithdrawLow = account.CanWithdraw(120);
+        bool canWithdrawHigh = account.CanWithdraw(180);
     }
 }
 
-    public bool CanWithdraw(decimal amount)
-    {
-        if (Balance - amount >= -OverdraftLimit)
-        {
-            Console.WriteLine($"{Owner} can withdraw ${amount}.");
-            return true;
-        }
-
-        Console.WriteLine($"{Owner} cannot withdraw ${amount}.");
-        return false;
-    }

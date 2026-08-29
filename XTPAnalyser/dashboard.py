@@ -971,6 +971,11 @@ def anl_start(_n, sha_a, sha_b, text_bin):
     if not bin_txt:
         return dash.no_update, dash.no_update, dash.no_update
 
+    # Always write the current store content to disk before launching the
+    # pipeline so the file at _BIN2BIN matches what the user uploaded, even
+    # if the Generate tab has since overwritten the same path.
+    _BIN2BIN.write_text(bin_txt, encoding="utf-8")
+
     with _anl_lock:
         if _anl_state["running"]:
             return dash.no_update, dash.no_update, dash.no_update

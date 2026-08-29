@@ -16,9 +16,11 @@ public class InvoiceCalculator
 
     public bool HasDiscount(decimal total)
     {
-        return total > DiscountThreshold;
+        return total > DiscountEligibleTotalThreshold;
     }
+
+    private const decimal DiscountEligibleTotalThreshold = 1000m;
 }
 
-    private const decimal DiscountThreshold = 1000m;
 
+    private const decimal DiscountThreshold = 1000m;

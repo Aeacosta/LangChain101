@@ -3,12 +3,23 @@ using System;
 public class BankAccount
 {
     public string Owner { get; set; }
-    public decimal Balance { get; private set; }
-    public decimal OverdraftLimit { get; private set; }
+    public decimal Balance { get; set; }
+    public decimal OverdraftLimit { get; set; }
+}
+
+public class BankManager
+{
 
     public bool CanWithdraw(decimal amount)
     {
-        return Balance - amount >= -OverdraftLimit;
+        if (Balance - amount >= -OverdraftLimit)
+        {
+            Console.WriteLine($"{Owner} can withdraw ${amount}.");
+            return true;
+        }
+
+        Console.WriteLine($"{Owner} cannot withdraw ${amount}.");
+        return false;
     }
 }
 
@@ -25,8 +36,7 @@ public class Program
 
         var manager = new BankManager();
 
-        bool canWithdrawLow = account.CanWithdraw(120);
-        bool canWithdrawHigh = account.CanWithdraw(180);
+        account.CanWithdraw(120);
+        account.CanWithdraw(180);
     }
 }
-

@@ -1,18 +1,18 @@
 public class CustomerService
 {
-    private string customerName;
-    private int age;
-    private bool isActive;
-    private decimal balance;
-    private List<Order> orders;
+    private string strCustomerName;
+    private int iCustomerAge;
+    private bool bIsActive;
+    private decimal decBalance;
+    private List<Order> lstOrders;
 
     public void UpdateCustomer(
-        string name,
-        int age,
-        bool active)
+        string strName,
+        int iAge,
+        bool bActive)
     {
-        this.customerName = name;
-        this.age = age;
-        this.isActive = active;
+        strCustomerName = strName;
+        iCustomerAge = iAge;
+        bIsActive = bActive;
     }
-}    public void Activate() => IsActive = true;    public void Deactivate() => IsActive = false;    public void UpdateProfile(string name, int age)    {        if (string.IsNullOrWhiteSpace(name))            throw new ArgumentException("name");        if (age < 0)            throw new ArgumentException("age");        Name = name;        Age = age;    }
+}

@@ -17,9 +17,9 @@ validate_json_node  — passes the raw response through the JSON formatter and
                       checks whether the result is valid JSON.
 extract_report_node — assembles the final report dict (injects prompt_response).
 score_report_node   — runs the scorer; writes score_json only.
-patch_file_node     — applies unified diffs and writes the corrected file.
-                      Computes both the combined patch (all findings) and a
-                      per-finding patch list; writes disjoint keys only.
+patch_file_node     — computes a per-finding PatchResult for every finding
+                      that carries a diff, each applied independently against
+                      the original file content.  Writes disjoint keys only.
 merge_node          — recombines score_json + patch data into report after
                       the parallel branches.
 create_issue_node   — opens one GitHub Issue listing all findings when the
@@ -42,12 +42,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .agent_setup import agent as _agent
 from .GithubPRAgent import create_issue_per_finding_sync, resolve_repo
-from Helpers.FilePatcher import (
-    apply_fixes,
-    git_apply_patch,
-    preview_patch,
-    preview_patch_single_finding,
-)
+from Helpers.FilePatcher import apply_fixes
 from Helpers.JsonFormatterAgent import JsonFormatterAgent
 from Helpers.LangfuseCallbackHandler import get_callback, trace_name_context
 from Helpers.Logger import AgentLogger
@@ -160,10 +155,10 @@ def score_report_node(state: GraphState) -> dict:
 def patch_file_node(state: GraphState) -> dict:
     """Node: Escribir Archivo corregido.
 
-    1. Reads the original file once.
-    2. Computes a per-finding PatchResult for every finding that has a diff.
-    3. Computes the combined PatchResult (all findings applied sequentially).
-    4. Writes the combined-patched content to disk.
+    Normalises and packages the raw LLM diff for each finding that carries
+    one.  Each diff is taken verbatim from the finding — no hunk matching,
+    no file mutation.  Diffs are displayed per-finding on the GitHub issue
+    and in the Dash UI, so no merging or disk write is needed here.
 
     Writes ONLY `patched`, `patch_content`, `patch_diff`, `patch_original`,
     and `finding_patches` — all disjoint from score_report_node.
@@ -172,74 +167,43 @@ def patch_file_node(state: GraphState) -> dict:
     report = state.get("report", {})
 
     try:
-        # ── Read original file ────────────────────────────────────────────────
         file_path: str = report.get("fileName", "")
-        if not file_path or not os.path.exists(file_path):
+        original = ""
+        if file_path and os.path.exists(file_path):
+            with open(file_path, encoding="utf-8") as fh:
+                original = fh.read()
+        else:
             _log._logger.warning("patch_file_node — source file not found: %s", file_path)
-            return {
-                "patched":         False,
-                "patch_content":   "",
-                "patch_diff":      "",
-                "patch_original":  "",
-                "finding_patches": [],
-            }
 
-        with open(file_path, encoding="utf-8") as fh:
-            original = fh.read()
-
-        # ── Per-finding patches (each applied to original independently) ──────
+        # ── Collect raw LLM diffs — no hunk matching, no file mutation ───────
         finding_patches: list[dict] = []
         for finding in sorted(report.get("findings", []), key=lambda f: f.get("id", 0)):
-            if not (finding.get("diff") or "").strip():
+            raw_diff = (finding.get("diff") or "").strip()
+            if not raw_diff:
                 continue
-            pr = preview_patch_single_finding(original, finding, file_path)
+            # Normalise literal \n escape sequences (common LLM artefact).
+            if "\n" not in raw_diff and "\\n" in raw_diff:
+                raw_diff = raw_diff.replace("\\n", "\n")
             finding_patches.append({
                 "finding_id":   finding.get("id"),
                 "smell":        finding.get("smell", ""),
-                "patched":      pr.patched,
-                "unified_diff": pr.unified_diff,
-                "errors":       pr.errors,
+                "unified_diff": raw_diff,
+                "errors":       [],
             })
             _log._logger.debug(
                 "patch_file_node — finding #%s diff lines: %d",
-                finding.get("id"), len(pr.unified_diff.splitlines()),
+                finding.get("id"), len(raw_diff.splitlines()),
             )
 
-        # ── Combined patch (all findings applied sequentially) ────────────────
-        combined_pr = git_apply_patch(report, logger=_log) or preview_patch(report)
-        if combined_pr is None:
-            _log._logger.warning("patch_file_node — combined patch returned None")
-            report["_patchOriginal"]  = original
-            report["_findingPatches"] = finding_patches
-            return {
-                "report":          report,
-                "patched":         False,
-                "patch_content":   original,
-                "patch_diff":      "",
-                "patch_original":  original,
-                "finding_patches": finding_patches,
-            }
-
-        # Write combined-patched content to disk.
-        with open(combined_pr.file_path, "w", encoding="utf-8") as fh:
-            fh.write(combined_pr.patched)
-
         _log._logger.info(
-            "patch_file_node — combined patch written ✓  (%d per-finding patches)",
+            "patch_file_node — %d per-finding diff(s) collected ✓",
             len(finding_patches),
         )
 
-        # Embed patch metadata directly into report so merge_node and
-        # create_pr_node always have access regardless of LangGraph fan-in
-        # state-key merging behaviour.
-        report["_patchOriginal"]  = original
-        report["_findingPatches"] = finding_patches
-
         return {
-            "report":          report,
-            "patched":         True,
-            "patch_content":   combined_pr.patched,
-            "patch_diff":      combined_pr.unified_diff,
+            "patched":         bool(finding_patches),
+            "patch_content":   original,
+            "patch_diff":      "",
             "patch_original":  original,
             "finding_patches": finding_patches,
         }

@@ -15,7 +15,7 @@ from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 
 from . import GraphAgent
-from Helpers.FilePatcher import apply_fixes, git_apply_patch, preview_patch
+from Helpers.FilePatcher import apply_fixes
 
 # ── File discovery ────────────────────────────────────────────────────────────
 
@@ -275,92 +275,59 @@ def update_patch_views(result: dict):
     if not result:
         return "", "", ""
 
-    # ── Prefer per-finding patches stored in the report ───────────────────────
-    # Each finding was patched independently against the original, so the union
-    # of their diffs is exactly "what every finding would change."
-    finding_patches = result.get("_findingPatches", [])
     original        = result.get("_patchOriginal", "")
-    raw_content     = result.get("_patchContent", "")
-    unified_diff    = result.get("_patchDiff", "")
+    finding_patches = result.get("_findingPatches", [])
 
-    if not raw_content:
-        # Fallback: compute from scratch (e.g. when running without the graph).
-        pr = git_apply_patch(result) or preview_patch(result)
-        if pr is None:
-            msg = "Source file not found or unreadable."
-            return msg, msg, dbc.Alert(msg, color="warning")
-        raw_content  = pr.patched
-        unified_diff = pr.unified_diff
-        original     = pr.original
-        finding_patches = []
-
-    if not original:
-        original = raw_content
-
-    # ── Diff tab — show each finding's diff in its own labelled block ─────────
+    # ── Diff tab — one coloured block per finding ─────────────────────────────
     diff_children: list = []
+    for fp in finding_patches:
+        fid   = fp.get("finding_id", "?")
+        smell = fp.get("smell", "")
+        fdiff = fp.get("unified_diff", "")
+        if not fdiff.strip():
+            continue
 
-    if finding_patches:
-        # One coloured block per finding, labelled with its id and smell.
-        for fp in finding_patches:
-            fid   = fp.get("finding_id", "?")
-            smell = fp.get("smell", "")
-            fdiff = fp.get("unified_diff", "")
-            if not fdiff.strip():
-                continue
-
-            block_lines = []
-            for line in fdiff.splitlines():
-                if line.startswith("+") and not line.startswith("+++"):
-                    block_lines.append(html.Span(line + "\n", style={"color": "#16a34a"}))
-                elif line.startswith("-") and not line.startswith("---"):
-                    block_lines.append(html.Span(line + "\n", style={"color": "#dc2626"}))
-                elif line.startswith("@@"):
-                    block_lines.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
-                else:
-                    block_lines.append(html.Span(line + "\n", style={"color": "#57606a"}))
-
-            diff_children.append(html.Div([
-                html.Div(
-                    f"▸ Finding #{fid} — {smell}",
-                    style={
-                        "fontWeight": "600",
-                        "fontSize":   "0.75rem",
-                        "color":      "#3b82d4",
-                        "marginTop":  "10px",
-                        "marginBottom": "2px",
-                    },
-                ),
-                html.Pre(
-                    block_lines,
-                    style={
-                        "fontSize":        "0.78rem",
-                        "backgroundColor": "#f7f8fa",
-                        "padding":         "8px",
-                        "borderRadius":    "4px",
-                        "margin":          "0",
-                    },
-                ),
-            ]))
-    else:
-        # Fallback: render the combined unified diff as a single block.
-        for line in unified_diff.splitlines():
+        block_lines = []
+        for line in fdiff.splitlines():
             if line.startswith("+") and not line.startswith("+++"):
-                diff_children.append(html.Span(line + "\n", style={"color": "#16a34a"}))
+                block_lines.append(html.Span(line + "\n", style={"color": "#16a34a"}))
             elif line.startswith("-") and not line.startswith("---"):
-                diff_children.append(html.Span(line + "\n", style={"color": "#dc2626"}))
+                block_lines.append(html.Span(line + "\n", style={"color": "#dc2626"}))
             elif line.startswith("@@"):
-                diff_children.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
+                block_lines.append(html.Span(line + "\n", style={"color": "#7c5cd8"}))
             else:
-                diff_children.append(html.Span(line + "\n", style={"color": "#57606a"}))
+                block_lines.append(html.Span(line + "\n", style={"color": "#57606a"}))
+
+        diff_children.append(html.Div([
+            html.Div(
+                f"▸ Finding #{fid} — {smell}",
+                style={
+                    "fontWeight": "600",
+                    "fontSize":   "0.75rem",
+                    "color":      "#3b82d4",
+                    "marginTop":  "10px",
+                    "marginBottom": "2px",
+                },
+            ),
+            html.Pre(
+                block_lines,
+                style={
+                    "fontSize":        "0.78rem",
+                    "backgroundColor": "#f7f8fa",
+                    "padding":         "8px",
+                    "borderRadius":    "4px",
+                    "margin":          "0",
+                },
+            ),
+        ]))
 
     diff_content = html.Div(diff_children) if diff_children else "No changes produced."
 
-    # Preview tab — side-by-side original vs combined patched
-    all_errors = [e for fp in finding_patches for e in fp.get("errors", [])]
-    preview_content = _render_side_by_side(original, raw_content, all_errors)
+    # Raw tab — original file content
+    # Preview tab — original file (no patched version is computed any more)
+    preview_content = _render_side_by_side(original, original, [])
 
-    return raw_content, diff_content, preview_content
+    return original, diff_content, preview_content
 
 
 @app.callback(

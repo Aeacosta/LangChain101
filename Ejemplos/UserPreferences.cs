@@ -12,39 +12,51 @@ namespace Netflix
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern bool ReleaseCapture();
 
-        private readonly PreferenceRepository repository;
-        private readonly PreferenceSelector selector;
-        public UserPreferences(Profile profile)
+        string fileDirectory, currentProfile, currentAccount;
+        static int count = 0;
+        const int totalOptions = 7, preferenceLimit = 4;
+        int profileIndex = 0;
+        string[] selectedLabels;
+        FileHandlingUtilites f = new FileHandlingUtilites();
+        public UserPreferences(string user, string account, int index)
         {
             InitializeComponent();
-            this.profile = profile;
-            fileDirectory = Environment.CurrentDirectory + @"\Data\Profiles\" + profile.Account + @"\" + profile.User;
+            this.currentProfile = user;
+            this.currentAccount = account;
+            this.profileIndex = index;
+            fileDirectory = Environment.CurrentDirectory + @"\Data\Profiles\" + currentAccount + @"\" + currentProfile;
             fileProcesses();
             selectedLabels = new string[totalOptions];
             for (int i = 0; i < totalOptions; i++)
                 selectedLabels[i] = "";
         }
-        // La persistencia se delega a PreferenceRepository
+        public void fileProcesses()
+        {
+            f.createDirectory(fileDirectory);
+            fileDirectory += @"\preferences.txt";
+            f.createFile(fileDirectory);
+            f.ReadData(fileDirectory);
+        }
         public void checkIfPreferencesPresent()
         {
-            if (fileHandler.numberOfLines > 0)
+            if (f.numberOfLines > 0)
             {
                 this.Hide();
-                MainPage mainPage = new MainPage(currentProfile, currentAccount, profileIndex);
-                mainPage.Show();
+                MainPage f = new MainPage(currentProfile, currentAccount, profileIndex);
+                f.Show();
             }
             else this.Show();
         }
-        private void makeLog(string labelName, Genre genre)
+        private void makeLog(string labelName, int i)
         {
             if (count == preferenceLimit)
             {
-                if (isLabelStored(labelName, genre))
+                if (isLabelStored(labelName, i))
                     return;
                 MessageBox.Show("OOPs You Have Reached The Limit!");
                 return;
             }
-            if (isLabelStored(labelName, genre))
+            if (isLabelStored(labelName, i))
                 return;
             if (selectedLabels[i] == "")
             {
@@ -57,10 +69,31 @@ namespace Netflix
         private void setIDImage(int index, bool type)
         {
             string imageLocation = Environment.CurrentDirectory + @"\Data\Movie Titles\Genre Icons\";
-            if (index < 0 || index >= genrePictures.Length) return;
-            string fileName = type ? "Selected_" + genreNames[index] : genreNames[index];
-            genrePictures[index].ImageLocation = imageLocation + fileName + ".png";
-            genrePictures[index].SizeMode = PictureBoxSizeMode.Zoom;
+            switch (index)
+            {
+                case 0:
+                    if (type == false)
+                        ID0.ImageLocation = (imageLocation + "Action.png");
+                    else
+                        ID0.ImageLocation = (imageLocation + "Selected_Action.png");
+                    ID0.SizeMode = PictureBoxSizeMode.Zoom;
+                    break;
+                case 1:
+                    if (type == false)
+                        ID1.ImageLocation = (imageLocation + "Children.png");
+                    else
+                        ID1.ImageLocation = (imageLocation + "Selected_Children.png");
+                    ID1.SizeMode = PictureBoxSizeMode.Zoom;
+                    break;
+                case 2:
+                    if (type == false)
+                        ID2.ImageLocation = (imageLocation + "Mystery.png");
+                    else
+                        ID2.ImageLocation = (imageLocation + "Selected_Mystery.png");
+                    ID2.SizeMode = PictureBoxSizeMode.Zoom;
+                    break;
+                case 3:
+                    if (type == false)
                         ID3.ImageLocation = (imageLocation + "Drama.png");
                     else
                         ID3.ImageLocation = (imageLocation + "Selected_Drama.png");
@@ -108,22 +141,48 @@ namespace Netflix
         }
         private void nextBtn_Click(object sender, EventArgs e)
         {
-            if(count < minPreferences)
+            if(count <= 2)
             {
-                MessageBox.Show("Please select at least " + minPreferences + " " + "preferences!");
+                MessageBox.Show("Please select at least 3 Preferneces!");
                 return;
             }
             storeLog();
             this.Hide();
-            MainPage f = new MainPage(profile);
+            MainPage f = new MainPage(currentProfile, currentAccount, profileIndex);
             f.Show();
         }
-        // Registrar en el Designer: pictureBox.Tag = i; and Wire Click once:
-        private void Genre_Click(object sender, EventArgs e)
+        private void ID0_Click(object sender, EventArgs e)
         {
-            var box = (PictureBox)sender;
-            int index = (int)box.Tag;
-            makeLog(((Label)Controls["label" + index]).Text, index);
+            makeLog(label0.Text, 0);
+        }
+
+        private void ID1_Click(object sender, EventArgs e)
+        {
+            makeLog(label1.Text, 1);
+        }
+
+        private void ID2_Click(object sender, EventArgs e)
+        {
+            makeLog(label2.Text, 2);
+        }
+
+        private void ID3_Click(object sender, EventArgs e)
+        {
+            makeLog(label3.Text, 3);
+        }
+
+        private void ID4_Click(object sender, EventArgs e)
+        {
+            makeLog(label4.Text, 4);
+        }
+        private void ID5_Click(object sender, EventArgs e)
+        {
+            makeLog(label5.Text, 5);
+        }
+
+        private void ID6_Click(object sender, EventArgs e)
+        {
+            makeLog(label6.Text, 6);
         }
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HT_CAPTION = 0x2;
@@ -153,23 +212,10 @@ namespace Netflix
             pictureBox3.BackColor = Color.Transparent;
         }
 
-        private void ID0_Click(object sender, EventArgs e)
+        private void pictureBox3_Click(object sender, EventArgs e)
         {
-            makeLog(label0.Text, Genre.Action);
+            Application.Exit();
         }
 
     }
 }
-    public enum Genre
-    {
-        Action = 0,
-        Children = 1,
-        Mystery = 2,
-        Drama = 3,
-        Comedy = 4,
-        Horror = 5,
-        Romance = 6
-    }
-
-            int i = (int)genre;
-        const int minPreferences = 3;

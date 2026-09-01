@@ -1,0 +1,2 @@
+https://github.com/Aeacosta/LangChain101
+Usar Visual Stidoo code para visualizar Presentacion.ipynb

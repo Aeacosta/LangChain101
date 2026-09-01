@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Respuestas Cuestionario — Módulo III</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    color: #1f2328;
+    background: #ffffff;
+    padding: 40px 20px 60px;
+  }
+
+  .container {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    margin-bottom: 32px;
+    color: #1f2328;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 12px;
+  }
+
+  h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-top: 44px;
+    margin-bottom: 16px;
+    color: #1f2328;
+    border-left: 4px solid #3b82d4;
+    padding-left: 12px;
+  }
+
+  h3 {
+    font-size: 0.97rem;
+    font-weight: 600;
+    margin-top: 14px;
+    margin-bottom: 4px;
+    color: #1f2328;
+  }
+
+  ol {
+    padding-left: 24px;
+  }
+
+  ol > li {
+    margin-bottom: 14px;
+    color: #1f2328;
+  }
+
+  ul {
+    list-style: lower-alpha;
+    padding-left: 24px;
+    margin-top: 6px;
+  }
+
+  ul > li {
+    margin-bottom: 4px;
+    color: #1f2328;
+  }
+
+  code {
+    background: #f7f8fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.88em;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    color: #1f2328;
+  }
+
+  a { color: #3b82d4; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .source-link {
+    margin-top: 20px;
+    font-size: 0.9rem;
+    color: #57606a;
+  }
+
+  /* ── Evaluation table ── */
+  .eval-section { margin-top: 52px; }
+  .eval-section h2 { border-left-color: #7c5cd8; }
+
+  .eval-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-top: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.87rem;
+  }
+
+  thead tr { background: #f7f8fa; }
+
+  thead th {
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: #1f2328;
+    border-bottom: 2px solid #e5e7eb;
+    white-space: nowrap;
+  }
+
+  tbody tr { border-bottom: 1px solid #e5e7eb; }
+  tbody tr:last-child {
+    border-bottom: none;
+    background: #f7f8fa;
+    font-weight: 700;
+  }
+
+  tbody td { padding: 9px 14px; vertical-align: middle; }
+
+  td.criterion { font-weight: 500; white-space: nowrap; }
+  td.weight    { white-space: nowrap; color: #57606a; text-align: center; }
+  td.evidence  { color: #57606a; font-size: 0.82rem; line-height: 1.5; }
+
+  td.score-cell {
+    text-align: center;
+    white-space: nowrap;
+    font-weight: 600;
+    border-radius: 4px;
+  }
+
+  /* ── Gradient legend ── */
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    font-size: 0.82rem;
+    color: #57606a;
+  }
+  .legend-bar {
+    flex: 1;
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(to right,
+      hsl(0,80%,92%),
+      hsl(30,75%,91%),
+      hsl(60,70%,90%),
+      hsl(90,65%,89%),
+      hsl(120,60%,88%)
+    );
+    border: 1px solid #e5e7eb;
+  }
+
+  .page-footer {
+    margin-top: 56px;
+    padding-top: 14px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 12px;
+    color: #57606a;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Respuestas</h1>
+
+  <!-- ═══════════════════════════════════════════════════
+       CASO A
+  ════════════════════════════════════════════════════ -->
+  <h2>Caso A — Anthropic: ¿Multiagente o sobrearquitectura?</h2>
+  <ol>
+    <li>Los sistemas multiagénticos son recomendados en aplicaciones donde la solución final se puede separar en varias tareas independientes. Siempre y cuando el costo en tokens no es una limitante considerable, el uso de arquitectura multiagéntica puede ser una buena alternativa.</li>
+    <li>Las tareas paralelizables son aquellas que no requieren información de otro agente. Esto no aplicaría para los casos donde es requerido compartir contexto o en sistemas asíncronos donde es crucial información de pasos previos.</li>
+    <li>Definiendo un rol detallado, un objetivo específico y definición de cuáles herramientas usar para cada agente, se reduce el riesgo de tareas redundantes entre ellos. Contextos independientes y tareas aisladas son también consideraciones importantes para evitar agentes redundantes.</li>
+    <li>El sistema recomienda usar 3 o más herramientas en paralelo. El consumo de tokens se puede basar en los datos donde se menciona 15 veces más respecto a un chat de IA habitual. El orquestador manda de 3 a 5 agentes a ejecutar en paralelo. Dada la limitante en agentes de su ventana de texto, el documento recomienda limitarlos a 200 000 tokens para evitar truncamientos. La expectativa del sistema es reducir los tiempos en un 90% con respecto a un sistema no agéntico.</li>
+    <li>
+      <h3>Métricas de éxito para sistemas multiagénticos:</h3>
+      <ul>
+        <li>Completitud en respuestas.</li>
+        <li>Rango de repetibilidad. Qué tan frecuente el sistema agente da la misma respuesta sobre una misma pregunta.</li>
+        <li>Exactitud en las citas con respecto a la respuesta dada.</li>
+      </ul>
+      <h3>Métricas de degradación para sistemas multiagénticos:</h3>
+      <ul>
+        <li>Tasa de alucinaciones.</li>
+        <li>Incremento considerable en gasto de tokens.</li>
+        <li>Incremento en latencia de respuesta.</li>
+      </ul>
+    </li>
+    <li>Para casos de falla, realiza un reintento desde el punto guardado en memoria. Esto para que el orquestador no repita tareas ya completadas. Si un subagente tarda demasiado en su tarea, este puede comprometer al resto del sistema. Si bien el documento no menciona cómo manejar largas latencias, se puede recomendar un tiempo límite de proceso de tarea. Si este excede dicho tiempo, se considera un error del subagente.</li>
+    <li>
+      Las siguientes variables son importantes a considerar para un plan de trazabilidad:
+      <ul>
+        <li>Consumo de tokens.</li>
+        <li>Herramientas usadas.</li>
+        <li>Prompt de entrada por subagente.</li>
+        <li>Respuesta de salida por subagente.</li>
+        <li>Duración en respuesta.</li>
+      </ul>
+    </li>
+    <li>El sistema puede simplificarse a un solo agente si este es sencillo. Si la tarea es puntual y no requiere procesamiento intermedio ni coordinación entre etapas, puede hacer innecesario y costoso una arquitectura multiagéntica. Tampoco se recomienda sistemas multiagénticos en tareas lineales donde existen muchas dependencias secuenciales o casos donde los agentes requieren compartir el mismo contexto.</li>
+    <li>Primeramente, el grado de confianza es la principal métrica a la hora de analizar riesgos en sistemas. Aunque el sistema responda más rápido, si las respuestas son erróneas, no habrá beneficio alguno. En segundo lugar, se puede rescatar la latencia dado que un sistema multiagéntico tiene esta característica como su principal atractivo.</li>
+    <li><code>No Go</code>: el sistema presenta una falta de intervención humana en evaluación de sus respuestas. Este solo depende de sus subagentes y orquestador. Es necesario incluir un protocolo de evaluación de calidad de respuesta.</li>
+  </ol>
+  <p class="source-link"><a href="https://www.anthropic.com/engineering/multi-agent-research-system" target="_blank">Fuente</a></p>
+
+  <!-- ═══════════════════════════════════════════════════
+       CASO B
+  ════════════════════════════════════════════════════ -->
+  <h2>Caso B — Uber Genie: El RAG responde, pero ¿es confiable?</h2>
+  <ol>
+    <li>El mal desempeño de documentos: se utilizaban documentos en formato PDF o Markdown. Los cuales, a pesar de tener información confiable, al sistema RAG actual se le dificultaba interpretarlos por su formato. Ejemplo: tablas en markdown solían desalinearse entre filas y columnas.</li>
+    <li>Acceso a datos no autorizados: El LLM puede exponer datos sensibles de la compañía a usuarios. Información privada de usuarios puede caer en manos equivocadas afectando la reputación de la empresa. La alucinación puede dar información errónea a usuarios conllevando a problemas legales.</li>
+    <li>Se recomienda agregar al set de datos golden respuestas a preguntas comunes o ya existentes.</li>
+    <li>
+      Se proponen las siguientes rúbricas de evaluación:
+      <ul>
+        <li>Tiempo en responder.</li>
+        <li>Completitud.</li>
+        <li>Veracidad.</li>
+        <li>Fidelidad a fuentes.</li>
+        <li>Satisfacción del usuario (sistema de me gusta / no me gusta o evaluación).</li>
+      </ul>
+    </li>
+    <li>Un Script puede evaluar métricas medibles como tiempo de respuesta o datos de usuarios. Veracidad en respuestas o evaluación de información sensible requerirá de intervención humana o un Juez LLM.</li>
+    <li>Para validación de un Juez LLM con respecto a los estándares SME, se propone comparar sus validaciones con el set de datos golden.</li>
+    <li>
+      <h3>Informativo</h3>
+      <p>Los datos generados por el sistema deben ser confiables y los rangos de alucinación o erróneas deberían estar debajo del 5%.</p>
+      <h3>Seguridad y Privacidad</h3>
+      <p>La exposición de información sensible, idealmente, tiene que ser nula. Dichos datos pueden comprometer los datos de la empresa y la información de sus usuarios.</p>
+      <h3>Política Interna</h3>
+      <p>Dado este punto no es tan crucial ni sensible como los 2 previamente mencionados, este puede tener un umbral de calidad más flojo siempre y cuando no se incumplan las categorías previas. Si el 90% de las respuestas cumple con la política interna de la empresa, se podría considerar aceptable.</p>
+    </li>
+    <li>A pesar de la considerable tasa de veracidad, la exposición a consejos erróneos o inseguros debe ser nula para un sistema tan delicado como el expuesto.</li>
+    <li>Un Dashboard puede incluir estadísticas de las diferentes calificaciones dadas por el LLM-as-a-judge. Gráficos mostrando en cuáles áreas el sistema RAG suele fallar más frecuentemente.</li>
+    <li><code>Go With Conditions</code>: La mejora de la inyección por RAG dio resultados en la calidad de respuesta. Sin embargo, falta verificación en los datos e intervención humana en la evaluación de respuestas.</li>
+  </ol>
+  <p class="source-link"><a href="https://www.uber.com/us/en/blog/enhanced-agentic-rag/" target="_blank">Fuente</a></p>
+
+  <!-- ═══════════════════════════════════════════════════
+       CASO C
+  ════════════════════════════════════════════════════ -->
+  <h2>Caso C — Stripe: El agente recomienda, pero no decide</h2>
+  <ol>
+    <li>Un agente puede consultar información, extraer datos de documentos adjuntos, hacer análisis preliminares de riesgo y generar borradores de respuestas a clientes sin algún daño significativo. Por otro lado, presentar informes de actividad sospechosa a autoridades legales no debe realizarse sin supervisión humana por la sensibilidad de estos. De igual forma, dejar a la IA interactuar con entidades ajenas a la empresa no puede realizarse a la ligera sin supervisión.</li>
+    <li>Una acción se puede clasificar según el tipo de acción a realizar.</li>
+    <li>Un revisor humano debe cerciorarse de si la respuesta dada es congruente, sigue los principios de la empresa y no toca temas sensibles. En caso de tratarse de temas sensibles, se tiene que respaldar con información confiable.</li>
+    <li>Si se requiere analizar una respuesta del sistema 6 meses posterior, es importante recolectar información como: versión, dado que la arquitectura pudo cambiar desde entonces, prompt de entrada, respuesta, prompt de salida y documentación con la que el modelo estaba alimentado.</li>
+    <li>La intervención humana debe ser la encargada de solucionar conflictos que el agente presente entre la información bibliográfica y las herramientas utilizadas, o bien un agente orquestador.</li>
+    <li>Al existir buenas métricas, el sistema puede diluir problemas encontrados con el riesgo de ser ignorados. Calificar los riesgos por nivel de severidad lograría que los accidentes sean resaltados sin importar el valor de la métrica general. Crear métricas donde los errores de alta severidad afectan más el indicador propuesto con respecto a faltas más leves.</li>
+    <li>Antes de tomar la decisión de automatizar una tarea, se debe corroborar con evaluación humana. Asignar tareas pequeñas a cada agente para poder ser validadas incrementalmente antes de su automatización.</li>
+    <li>
+      Se establecen las siguientes métricas de:
+      <h3>Negocio</h3>
+      <ul>
+        <li>Costo de tokens.</li>
+        <li>Tiempo de latencia.</li>
+        <li>Cantidad de revisiones humanas por día.</li>
+      </ul>
+      <h3>Calidad</h3>
+      <ul>
+        <li>Tiempo de respuesta.</li>
+        <li>Tasa de alucinaciones.</li>
+        <li>Tasa de modificación humana.</li>
+      </ul>
+      <h3>Riesgo</h3>
+      <ul>
+        <li>Casos de intento de inyección de prompts.</li>
+        <li>Alerta de aprobación a ciegas por error humano.</li>
+      </ul>
+    </li>
+    <li>Para evitar revisiones por automatización o fatiga, se propone múltiples revisores sobre una misma respuesta para auditoría del primero. Establecer un flujo de trabajo que limite el exceso de revisiones diarias por humano aportaría a reducir este riesgo. Corroborar información con citas de la fuente utilizada.</li>
+    <li><code>Go</code>: La intervención humana en etapas tempranas asegura fiabilidad en el sistema. En especial, al ser una empresa que trabaja con información sensible. Una vez que se concluye que el sistema esté estable, se procede a su automatización. Se presenta un plan de desarrollo confiable.</li>
+  </ol>
+  <p class="source-link"><a href="https://aws.amazon.com/blogs/machine-learning/production-grade-ai-agents-for-financial-compliance-lessons-from-stripe/" target="_blank">Fuente</a></p>
+
+  <!-- ═══════════════════════════════════════════════════
+       EVALUACIÓN FINAL
+  ════════════════════════════════════════════════════ -->
+  <div class="eval-section">
+    <h2>Evaluación Final</h2>
+
+    <div class="eval-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Criterio</th>
+            <th>Peso</th>
+            <th>Evidencia de buen desempeño</th>
+            <th>Caso 1</th>
+            <th>Caso 2</th>
+            <th>Caso 3</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- score-cell: data-val = score obtained.
+               Regular rows: gradient base = Peso column (read from DOM at runtime).
+               Total row: gradient base = 100. -->
+          <tr>
+            <td class="criterion">Calidad del diagnóstico</td>
+            <td class="weight">25%</td>
+            <td class="evidence">Distingue síntomas de causas; identifica riesgos y supuestos relevantes</td>
+            <td class="score-cell" data-val="20">20%</td>
+            <td class="score-cell" data-val="22">22%</td>
+            <td class="score-cell" data-val="24">24%</td>
+          </tr>
+          <tr>
+            <td class="criterion">Decisiones justificadas</td>
+            <td class="weight">20%</td>
+            <td class="evidence">Recomienda arquitectura, autonomía y controles con trade-offs explícitos</td>
+            <td class="score-cell" data-val="12">12%</td>
+            <td class="score-cell" data-val="15">15%</td>
+            <td class="score-cell" data-val="19">19%</td>
+          </tr>
+          <tr>
+            <td class="criterion">Diseño de evaluación</td>
+            <td class="weight">20%</td>
+            <td class="evidence">Define métricas, dataset, umbrales y combinación sensata de evaluación automática y humana</td>
+            <td class="score-cell" data-val="10">10%</td>
+            <td class="score-cell" data-val="15">15%</td>
+            <td class="score-cell" data-val="20">20%</td>
+          </tr>
+          <tr>
+            <td class="criterion">Pensamiento de riesgo</td>
+            <td class="weight">15%</td>
+            <td class="evidence">Reconoce severidad, reversibilidad, privacidad, seguridad y responsabilidad</td>
+            <td class="score-cell" data-val="9">9%</td>
+            <td class="score-cell" data-val="14">14%</td>
+            <td class="score-cell" data-val="14">14%</td>
+          </tr>
+          <tr>
+            <td class="criterion">Viabilidad operativa</td>
+            <td class="weight">10%</td>
+            <td class="evidence">Considera costo, latencia, fallos de tools, monitoreo y mantenimiento</td>
+            <td class="score-cell" data-val="8">8%</td>
+            <td class="score-cell" data-val="6">6%</td>
+            <td class="score-cell" data-val="8">8%</td>
+          </tr>
+          <tr>
+            <td class="criterion">Comunicación y defensa</td>
+            <td class="weight">10%</td>
+            <td class="evidence">Presenta un dictamen claro, responde objeciones y usa evidencia del caso</td>
+            <td class="score-cell" data-val="3">3%</td>
+            <td class="score-cell" data-val="10">10%</td>
+            <td class="score-cell" data-val="9">9%</td>
+          </tr>
+          <tr class="total-row">
+            <td class="criterion"><strong>Total</strong></td>
+            <td class="weight"><strong>100%</strong></td>
+            <td class="evidence"></td>
+            <td class="score-cell" data-val="62"><strong>62%</strong></td>
+            <td class="score-cell" data-val="82"><strong>82%</strong></td>
+            <td class="score-cell" data-val="94"><strong>94%</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Gradient legend -->
+    <div class="legend">
+      <span>0%</span>
+      <div class="legend-bar"></div>
+      <span>100%</span>
+    </div>
+  </div>
+
+  <footer class="page-footer">Made with IBM Bob</footer>
+</div>
+
+<script>
+  // Gradient rules:
+  //  • Total row  → base 100 (absolute score out of 100).
+  //  • Other rows → base = Peso column value of that row (e.g. 25, 20, 15…).
+  // Hue 0 (red) → 120 (green) as ratio goes 0 → 1.
+  (function () {
+    document.querySelectorAll('.score-cell').forEach(function (td) {
+      var val = parseFloat(td.dataset.val);
+      var row = td.closest('tr');
+      var max;
+
+      if (row.classList.contains('total-row')) {
+        max = 100;
+      } else {
+        // Read the Peso cell (2nd column) and strip the % sign
+        var weightText = row.querySelector('td.weight').textContent.replace('%', '').trim();
+        max = parseFloat(weightText);
+      }
+
+      var ratio = Math.min(Math.max(val / max, 0), 1);
+
+      var hue = Math.round(ratio * 120);       // 0 = red, 120 = green
+      var sat = Math.round(80 - ratio * 20);   // 80% → 60%
+      var lit = Math.round(92 - ratio * 5);    // 92% → 87%
+
+      td.style.backgroundColor = 'hsl(' + hue + ',' + sat + '%,' + lit + '%)';
+      td.style.color            = ratio > 0.55 ? '#174a17' : '#6b1111';
+    });
+  })();
+</script>
+</body>
+</html>
